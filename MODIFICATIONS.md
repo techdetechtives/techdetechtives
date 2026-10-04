@@ -45,9 +45,18 @@ Everything under `analytics/`. Changed by TechDetechtives, 2026-10-04.
 | Sample data set captured from an attack simulation | Replaced by small synthetic sample data written for this project |
 | Sigma notebooks, Kibana dashboards, Logstash pipelines | Not carried over. Detections run on the platform. |
 
+## Ticketing
+
+Added in version 0.2.0, 2026-10-04. Original work; nothing here modifies Security Onion or DFIR-IRIS code.
+
+| What | How |
+| --- | --- |
+| DFIR-IRIS | Installed unmodified at the version in `upstream.lock`. Configuration supplied: generated database passwords and application secrets, an administrator password and API key, host name, port 8443, and a TLS certificate generated on the host in place of the shipped development certificate. |
+| Platform | No change. The forwarder reads alerts with the existing read-only key. |
+
 ## Test status
 
-As of 0.1.0.
+As of 0.2.0.
 
 Tested:
 
@@ -60,12 +69,17 @@ Tested:
 
 - Applied to a live Security Onion 2.4.211 standalone install (2026-10-04): the login banner and overview page were confirmed in the browser. Rule import and rule matching on that install are not yet confirmed.
 
+- Forwarder: 17 automated tests against local stand-ins for the platform and DFIR-IRIS, covering severity filtering, one ticket per alert, no duplicates across cycles and restarts, late-arriving alerts, outages, rejected alerts, the per-cycle cap, thousands of alerts sharing one timestamp, ticket contents and credentials.
+- `ticketing/setup-iris.sh`: fetching DFIR-IRIS 2.4.29, secret generation, re-run behaviour and the TLS certificate, with a stand-in for Docker. The forwarder was confirmed to trust that certificate and to refuse others.
+
 Not yet tested:
 
 - Rule import and matching on a live install; the Sigma rules have not been run through the platform's Sigma conversion.
 - `platform/create-readonly-key.sh` (needs a live manager).
 - Building the container image, and running Spark and JupyterLab in it. Package versions in `analytics/requirements.txt` are ranges that have not been resolved in a build.
 - `td_hunt` against a live Elasticsearch.
+- DFIR-IRIS has not been started from this setup, and the forwarder has not posted to a real DFIR-IRIS or read from a real platform. The alert fields and API calls were written from the Security Onion 2.4.211 and DFIR-IRIS 2.4.29 source code.
+- The forwarder container image has not been built.
 - The Suricata and YARA rules have not been run through their engines' syntax checks.
 
 `scripts/verify.sh analytics` runs a self-test inside the container that covers Spark and the platform connection.

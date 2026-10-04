@@ -6,6 +6,7 @@
 #   scripts/verify.sh repo        Static checks of this repository (runs anywhere).
 #   sudo scripts/verify.sh platform   On the manager: is the overlay installed?
 #   scripts/verify.sh analytics   On the analytics host: is the workbench healthy?
+#   scripts/verify.sh ticketing   On the analytics host: are DFIR-IRIS and the forwarder working?
 
 set -euo pipefail
 
@@ -16,7 +17,7 @@ FAILED=0
 
 pass() { printf '[ ok ] %s\n' "$*"; }
 fail() { printf '[FAIL] %s\n' "$*"; FAILED=1; }
-usage() { sed -n '5,8p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '5,9p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 cmd_repo() {
   local f
@@ -80,6 +81,11 @@ for problem in problems:
 sys.exit(1 if problems else 0)
 PY
     then pass "notebooks, sample data and rules parse"; else fail "notebooks, sample data or rules have problems (listed above)"; fi
+    if python3 -m unittest discover -s "$ROOT/ticketing/tests" >/dev/null 2>&1; then
+      pass "forwarder tests"
+    else
+      fail "forwarder tests (run: python3 -m unittest discover -s ticketing/tests -v)"
+    fi
   else
     printf '[skip] python3 not found; content checks skipped\n'
   fi
@@ -106,10 +112,35 @@ cmd_analytics() {
   fi
 }
 
+cmd_ticketing() {
+  command -v docker >/dev/null 2>&1 || { fail "docker is not installed"; return; }
+  [[ -f "$ENV_FILE" ]] || { fail "$ENV_FILE not found; run scripts/install.sh ticketing first"; return; }
+  if [[ -d "$ROOT/ticketing/iris-web/.git" ]]; then
+    local running
+    running="$(cd "$ROOT/ticketing/iris-web" && docker compose ps --status running --services 2>/dev/null | wc -l)"
+    if [[ "$running" -ge 5 ]]; then pass "DFIR-IRIS: $running of 5 services running"; else fail "DFIR-IRIS: only $running of 5 services running"; fi
+  else
+    printf '[skip] DFIR-IRIS is not installed from this repository (external instance assumed)\n'
+  fi
+  local compose=(docker compose -f "$ROOT/ticketing/docker-compose.yml" --env-file "$ENV_FILE")
+  if [[ -n "$("${compose[@]}" ps --status running -q td-forwarder 2>/dev/null)" ]]; then
+    pass "td-forwarder container is running"
+  else
+    fail "td-forwarder container is not running (docker logs td-forwarder)"
+    return
+  fi
+  if "${compose[@]}" exec -T td-forwarder python /opt/techdetechtives/td_forwarder.py --check; then
+    pass "forwarder can reach the platform and DFIR-IRIS"
+  else
+    fail "forwarder connection check"
+  fi
+}
+
 case "${1:-}" in
   repo)      cmd_repo ;;
   platform)  cmd_platform ;;
   analytics) cmd_analytics ;;
+  ticketing) cmd_ticketing ;;
   -h|--help) usage; exit 0 ;;
   *)         usage >&2; exit 2 ;;
 esac

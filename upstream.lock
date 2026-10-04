@@ -3,3 +3,4 @@
 # name | repository | branch | commit | version | licence
 securityonion|https://github.com/Security-Onion-Solutions/securityonion.git|3/main|3e5a934ff842987ccc76c5567590473eca61dedd|3.3.0|Elastic-2.0
 helk|https://github.com/Cyb3rWard0g/HELK.git|master|ad752b2a0d56110c0df49fa3e9e5e19f556039db|alpha (2021-05-08)|GPL-3.0
+dfir-iris|https://github.com/dfir-iris/iris-web.git|v2.4.29|340ce04080806a83837b713d01ea70632ee2b3f7|2.4.29|LGPL-3.0

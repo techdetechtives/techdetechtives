@@ -5,3 +5,6 @@ analytics/notebooks/.ipynb_checkpoints/
 **/__pycache__/
 upstream/
 *.td-bak
+ticketing/iris-web/
+ticketing/certs/*
+!ticketing/certs/.gitkeep
