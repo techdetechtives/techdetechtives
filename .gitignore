@@ -1,0 +1,7 @@
+config/techdetechtives.env
+analytics/certs/*
+!analytics/certs/.gitkeep
+analytics/notebooks/.ipynb_checkpoints/
+**/__pycache__/
+upstream/
+*.td-bak

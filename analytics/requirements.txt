@@ -1,0 +1,12 @@
+# TechDetechtives analytics workbench.
+# Ranges, not exact pins: the image build resolves the newest release in each
+# range. Run `pip freeze` in a working container and commit the result as
+# requirements.lock if you need reproducible builds.
+jupyterlab>=4.2,<5
+pyspark>=3.5.3,<3.6
+pandas>=2.2,<3
+numpy>=1.26,<2
+pyarrow>=15
+elasticsearch>=9,<10
+matplotlib>=3.8
+networkx>=3.2

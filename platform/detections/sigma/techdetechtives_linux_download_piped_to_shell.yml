@@ -1,0 +1,32 @@
+title: TechDetechtives - Download Piped Directly Into a Shell
+id: be6adfdf-d036-48fc-b125-a9476ae8ec5f
+status: experimental
+description: >
+  Detects a command line that fetches remote content with curl or wget and
+  pipes it straight into a shell, which runs code that was never written to
+  disk for inspection.
+author: TechDetechtives
+date: 2026-10-04
+tags:
+  - attack.execution
+  - attack.t1059.004
+  - attack.command_and_control
+  - attack.t1105
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection_fetch:
+    CommandLine|contains:
+      - 'curl '
+      - 'wget '
+  selection_pipe:
+    CommandLine|contains:
+      - '| sh'
+      - '|sh'
+      - '| bash'
+      - '|bash'
+  condition: selection_fetch and selection_pipe
+falsepositives:
+  - Installer one-liners run by administrators
+level: medium
