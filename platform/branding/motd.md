@@ -1,3 +1,5 @@
+@@TD_BRAND_IMAGE@@
+
 ## Welcome to TechDetechtives
 
 TechDetechtives is a detection and threat-hunting platform. This console handles collection, alerting, hunting and case work. The analytics workbench adds notebooks and Spark for deeper analysis of the same data.

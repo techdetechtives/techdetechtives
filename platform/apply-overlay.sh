@@ -10,7 +10,7 @@
 # licence-key features.
 #
 # Usage:
-#   sudo ./apply-overlay.sh apply  [--dry-run] [--no-salt] [--jupyter-url URL] [--tickets-url URL] [--vuln-url URL]
+#   sudo ./apply-overlay.sh apply  [--dry-run] [--no-salt] [--jupyter-url URL] [--tickets-url URL] [--vuln-url URL] [--brand-image-url URL|none]
 #   sudo ./apply-overlay.sh revert [--dry-run] [--no-salt]
 #   sudo ./apply-overlay.sh status
 
@@ -42,6 +42,10 @@ RUN_SALT=1
 JUPYTER_URL="${TD_JUPYTER_URL:-https://ANALYTICS-HOST:8888 (ask your administrator)}"
 TICKETS_URL="${TD_TICKETS_URL:-not installed yet (ask your administrator)}"
 VULN_URL="${TD_VULN_URL:-not installed yet (ask your administrator)}"
+# Brand image on the console's overview page. The console can only show images
+# that the analyst's browser can fetch from another host, so the default is the
+# copy in the public repository. Use "none" on networks without internet access.
+BRAND_IMAGE_URL="${TD_BRAND_IMAGE_URL:-https://raw.githubusercontent.com/techdetechtives/techdetechtives/main/branding/banner-480.png}"
 
 log()  { printf '[techdetechtives] %s\n' "$*"; }
 warn() { printf '[techdetechtives] WARNING: %s\n' "$*" >&2; }
@@ -142,10 +146,13 @@ install_branding() {
       continue
     fi
     tmp="$(mktemp)"
+    local image_line=""
+    [[ "$BRAND_IMAGE_URL" != "none" ]] && image_line="![TechDetechtives]($BRAND_IMAGE_URL)"
     # Only substitutions in the files: where the other TechDetechtives parts live.
     sed -e "s|@@TD_JUPYTER_URL@@|${JUPYTER_URL//|/\\|}|g" \
         -e "s|@@TD_TICKETS_URL@@|${TICKETS_URL//|/\\|}|g" \
-        -e "s|@@TD_VULN_URL@@|${VULN_URL//|/\\|}|g" "$HERE/branding/$f" > "$tmp"
+        -e "s|@@TD_VULN_URL@@|${VULN_URL//|/\\|}|g" \
+        -e "s|@@TD_BRAND_IMAGE@@|${image_line}|g" "$HERE/branding/$f" > "$tmp"
     install -m 0644 "$tmp" "$SOC_FILES/$f"
     rm -f "$tmp"
     own "$SOC_FILES/$f"
@@ -294,11 +301,18 @@ while [[ $# -gt 0 ]]; do
     --jupyter-url) shift; [[ $# -gt 0 ]] || die "--jupyter-url needs a value"; JUPYTER_URL="$1" ;;
     --tickets-url) shift; [[ $# -gt 0 ]] || die "--tickets-url needs a value"; TICKETS_URL="$1" ;;
     --vuln-url)    shift; [[ $# -gt 0 ]] || die "--vuln-url needs a value"; VULN_URL="$1" ;;
+    --brand-image-url) shift; [[ $# -gt 0 ]] || die "--brand-image-url needs a value"; BRAND_IMAGE_URL="$1" ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die "unknown argument: $1" ;;
   esac
   shift
 done
+
+# Only characters that are safe inside the page's markdown and the substitution below.
+url_ok='^https://[A-Za-z0-9._~:/?=%-]+$'
+if [[ "$BRAND_IMAGE_URL" != "none" && ! "$BRAND_IMAGE_URL" =~ $url_ok ]]; then
+  die "--brand-image-url must be a plain https:// address (letters, digits and . _ ~ : / ? = % -), or the word none"
+fi
 
 case "$COMMAND" in
   apply)  cmd_apply ;;
