@@ -66,7 +66,7 @@ Added in version 0.3.0, 2026-10-04. Original work; nothing here modifies Securit
 
 ## Test status
 
-As of 0.4.0.
+As of 0.4.1.
 
 Tested:
 

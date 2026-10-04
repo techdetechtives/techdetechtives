@@ -103,7 +103,7 @@ Upgrade the platform with its own upgrade tool (`soup`). The overlay lives in th
 
 ## Status
 
-Version 0.4.0. What has and has not been exercised is listed in [MODIFICATIONS.md](MODIFICATIONS.md#test-status). In short: the overlay script, installers, notebook logic and static checks were tested against a mock platform tree and the sample data; the platform pages were confirmed on a live Security Onion 2.4.211; the container image builds, Spark, and live DFIR-IRIS and Greenbone runs have not been tested yet.
+Version 0.4.1. What has and has not been exercised is listed in [MODIFICATIONS.md](MODIFICATIONS.md#test-status). In short: the overlay script, installers, notebook logic and static checks were tested against a mock platform tree and the sample data; the platform pages were confirmed on a live Security Onion 2.4.211; the container image builds, Spark, and live DFIR-IRIS and Greenbone runs have not been tested yet.
 
 ## Licence
 
