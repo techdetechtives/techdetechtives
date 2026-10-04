@@ -1,0 +1,33 @@
+title: TechDetechtives - PowerShell Script Decodes Base64 and Invokes the Result
+id: 74e6c4c0-4083-4b86-a05a-906f7468cc07
+status: experimental
+description: >
+  Detects a PowerShell script block that decodes Base64 content and executes
+  the decoded result in the same block. This is the log-based counterpart of
+  the YARA rule TechDetechtives_Script_Base64_Decode_And_Invoke, which only
+  matches files; this rule matches ingested PowerShell script block logs.
+author: TechDetechtives
+date: 2026-10-04
+tags:
+  - attack.execution
+  - attack.t1059.001
+  - attack.defense_evasion
+  - attack.t1140
+logsource:
+  product: windows
+  category: ps_script
+  definition: 'Requirements: PowerShell Script Block Logging (event 4104) must be enabled and collected'
+detection:
+  selection_decode:
+    ScriptBlockText|contains: 'FromBase64String'
+  selection_invoke:
+    ScriptBlockText|contains:
+      - 'Invoke-Expression'
+      - 'IEX('
+      - 'IEX ('
+      - '| IEX'
+      - '|IEX'
+  condition: selection_decode and selection_invoke
+falsepositives:
+  - Administrative and deployment scripts that unpack embedded content
+level: medium

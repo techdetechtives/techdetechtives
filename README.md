@@ -69,6 +69,7 @@ Field names follow ECS, as on the platform. [docs/FIELD-MAPPING.md](docs/FIELD-M
 ## Customizing further
 
 - **Console pages:** edit `platform/branding/banner.md` and `motd.md`, then re-run the platform step.
+- **Which engine for what:** Sigma rules match ingested logs. Suricata rules match network traffic. YARA rules match files extracted from traffic, not logs. Rules installed by the overlay arrive disabled; enable them under Detections.
 - **Detections:** add Sigma rules to `platform/detections/sigma/`, Suricata rules to `suricata/` (SIDs 1900001 to 1900999 are reserved for this rule set), YARA rules to `yara/`, then re-run the platform step.
 - **Notebooks:** add them under `analytics/notebooks/`. New notebooks in that folder are GPL-3.0 if they build on the existing ones.
 - **Platform settings** (retention, sensors, integrations): use the console's Administration > Configuration screen. Those settings are stored by the platform and survive upgrades.
