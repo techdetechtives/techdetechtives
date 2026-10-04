@@ -1,0 +1,31 @@
+title: TechDetechtives - WMI Provider Host Spawning a Script Interpreter
+id: 2f25984a-e544-4359-a91d-b11cf0fd78fa
+status: experimental
+description: >
+  Detects the WMI provider host starting a command or script interpreter.
+  Remote WMI execution (for example lateral movement with wmic or
+  Invoke-WmiMethod) runs its payload as a child of WmiPrvSE.exe.
+author: TechDetechtives
+date: 2026-10-04
+tags:
+  - attack.execution
+  - attack.t1047
+  - attack.lateral_movement
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_parent:
+    ParentImage|endswith: '\WmiPrvSE.exe'
+  selection_child:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+      - '\cmd.exe'
+      - '\wscript.exe'
+      - '\cscript.exe'
+      - '\mshta.exe'
+  condition: selection_parent and selection_child
+falsepositives:
+  - Management and inventory software that runs scripts through WMI
+level: medium

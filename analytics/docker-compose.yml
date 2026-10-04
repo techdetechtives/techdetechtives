@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# TechDetechtives analytics workbench.
+# Modified work derived from HELK's compose files
+# (https://github.com/Cyb3rWard0g/HELK, docker/helk-kibana-notebook-analysis-basic.yml),
+# Copyright Roberto Rodriguez (@Cyb3rWard0g), GPL-3.0.
+# Modified by TechDetechtives, 2026: HELK's Elasticsearch, Logstash, Kibana,
+# Nginx, Kafka, KSQL and Spark cluster services are removed. The platform
+# supplies collection, storage and the console; this stack only adds the
+# notebook and Spark workbench, which reads from the platform.
+#
+# Start with:  scripts/install.sh analytics
+
+name: techdetechtives
+
+services:
+  td-jupyter:
+    build: .
+    image: techdetechtives/analytics:0.1.0
+    container_name: td-jupyter
+    env_file:
+      - ../config/techdetechtives.env
+    ports:
+      - "${TD_JUPYTER_BIND:-127.0.0.1}:${TD_JUPYTER_PORT:-8888}:8888"
+    volumes:
+      - ./notebooks:/home/hunter/work/notebooks
+      - td-data:/home/hunter/work/data
+      - ./certs:/certs:ro
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-file: "5"
+        max-size: "5m"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/api', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  td-data:
