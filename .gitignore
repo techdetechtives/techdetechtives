@@ -8,3 +8,6 @@ upstream/
 ticketing/iris-web/
 ticketing/certs/*
 !ticketing/certs/.gitkeep
+vulnerability/greenbone/
+vulnerability/certs/*
+!vulnerability/certs/.gitkeep

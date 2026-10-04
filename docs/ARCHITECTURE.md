@@ -27,6 +27,12 @@
         |  Ticketing                                             |
         |    forwarder (this repo) --HTTPS API--> DFIR-IRIS      |
         |    one ticket per alert, medium severity and above     |
+        |                                                        |
+        |  Vulnerability scanning                                |
+        |    Greenbone (OpenVAS) --local socket--> connector     |
+        |    connector --> dashboard and reports pages (8444)    |
+        |              --> findings to the platform (append-only)|
+        |              --> DFIR-IRIS tickets for findings        |
         +--------------------------------------------------------+
 ```
 
@@ -48,6 +54,14 @@ If you later need to change platform code itself, fork the upstream repository s
 3. It records what it sent in a small state file on a Docker volume. It re-reads the last ten minutes on every pass to catch alerts that were indexed late, and the state file stops those being ticketed twice.
 
 DFIR-IRIS is installed on the analytics host from its own repository at a pinned version, unmodified. See `ticketing/README.md`.
+
+## Vulnerability flow
+
+1. Greenbone scans the targets you define in its interface.
+2. Every five minutes the connector asks Greenbone, over its local management socket, for finished scan reports it has not copied yet, and stores their findings in a small local database.
+3. From that database it serves the dashboard and reports pages, appends each finding to the platform with a key that can do nothing else, and opens a DFIR-IRIS ticket for each new finding at or above the configured score.
+
+The connector shares no network port with Greenbone: it mounts Greenbone's socket volume read-write only to speak the management protocol, and runs with all Linux capabilities dropped except the one needed to open that socket. See `vulnerability/README.md`.
 
 ## Data flow
 

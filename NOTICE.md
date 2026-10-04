@@ -1,6 +1,6 @@
 # Notices
 
-TechDetechtives combines original work with three upstream projects. Each part keeps its own licence. This file is not legal advice.
+TechDetechtives combines original work with four upstream projects. Each part keeps its own licence. This file is not legal advice.
 
 ## 1. Security Onion (platform base)
 
@@ -44,10 +44,21 @@ DFIR-IRIS is installed unmodified. `ticketing/setup-iris.sh` fetches it from its
 
 TechDetechtives is not affiliated with or endorsed by the DFIR-IRIS project.
 
-## 4. Original TechDetechtives work
+## 4. Greenbone Community Edition (vulnerability scanning)
 
-Everything outside `analytics/` (the platform overlay, rules, ticket forwarder, scripts and documentation) is original work, Copyright (c) 2026 TechDetechtives, under the MIT licence in `LICENSE`.
+- Project: Greenbone Community Edition, https://github.com/greenbone (OpenVAS scanner, gvmd, GSA and related components)
+- Copyright Greenbone AG and contributors
+- Licences: GNU Affero General Public License v3.0 for the manager and web interface, GNU General Public License v2.0 for the scanner. The container setup file comes from Greenbone's documentation, which is under Creative Commons Attribution-ShareAlike 4.0.
+- Version installed: see `upstream.lock`
+
+Greenbone is installed unmodified from its official container images. `vulnerability/setup-greenbone.sh` fetches its setup file at install time into `vulnerability/greenbone/` and adds a small generated override that publishes the web interface on the internal network; none of Greenbone's code or its setup file is included in this repository. The TechDetechtives connector is a separate program that reads scan results from Greenbone over its management protocol.
+
+"Greenbone" and "OpenVAS" are trademarks of Greenbone AG. TechDetechtives is not affiliated with or endorsed by Greenbone AG.
+
+## 5. Original TechDetechtives work
+
+Everything outside `analytics/` (the platform overlay, rules, ticket forwarder, vulnerability connector and dashboard, scripts and documentation) is original work, Copyright (c) 2026 TechDetechtives, under the MIT licence in `LICENSE`.
 
 ## How the parts are kept separate
 
-The platform, the analytics workbench, the ticket forwarder and DFIR-IRIS are separate programs. The workbench and the forwarder read from the platform only over its Elasticsearch HTTP API, with a read-only key, and the forwarder writes to DFIR-IRIS only over its HTTP API. No GPL-licensed code is combined with Elastic-licensed code, and no Elastic-licensed code is copied into this repository.
+The platform, the analytics workbench, the ticket forwarder, DFIR-IRIS, Greenbone and the vulnerability connector are separate programs. The workbench and the forwarder read from the platform only over its Elasticsearch HTTP API, with a read-only key, and the forwarder writes to DFIR-IRIS only over its HTTP API. No GPL-licensed code is combined with Elastic-licensed code, and no Elastic-licensed code is copied into this repository.
