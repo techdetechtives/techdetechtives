@@ -10,7 +10,7 @@ Applied by `platform/apply-overlay.sh` on the manager node. First applied in ver
 | --- | --- | --- |
 | Login banner | `/opt/so/saltstack/local/salt/soc/files/soc/banner.md` | Replaced with the TechDetechtives banner. Previous file backed up. |
 | Console overview page | `/opt/so/saltstack/local/salt/soc/files/soc/motd.md` | Replaced with the TechDetechtives overview. Previous file backed up. |
-| Sigma rules | `/nsm/rules/custom-local-repos/local-sigma` | 3 rule files added and committed |
+| Sigma rules | `/nsm/rules/custom-local-repos/local-sigma` | 4 rule files added and committed |
 | Suricata rules | `/nsm/rules/custom-local-repos/local-suricata` | 1 rule file (2 rules, SIDs 1900001 and 1900002) added and committed |
 | YARA rules | `/nsm/rules/custom-local-repos/local-yara` | 1 rule file added and committed |
 
@@ -20,6 +20,8 @@ Applied by `platform/create-readonly-key.sh`:
 | --- | --- |
 | Elasticsearch API keys | One read-only key named `techdetechtives-analytics-ro` is created (read access to `logs-*` and `so-*`) |
 | Firewall | With `--allow-ip`, the analytics host is added to the `elasticsearch_rest` host group (port 9200) |
+
+Rules from the local repositories are imported **disabled**. Enable them in the console under Detections after the first import.
 
 **Not changed:** Security Onion's source code, container images, logo, licence notices, licence-key functionality, and Pro features. Both console pages state that the deployment is modified and what it is built on.
 
@@ -56,9 +58,11 @@ Tested:
 - Every notebook code cell, executed on the sample data with pandas. For the Spark SQL cells, an SQLite stand-in ran the same SQL text.
 - `docker compose config` accepts the Compose file. `scripts/verify.sh repo` passes.
 
+- Applied to a live Security Onion 2.4.211 standalone install (2026-10-04): the login banner and overview page were confirmed in the browser. Rule import and rule matching on that install are not yet confirmed.
+
 Not yet tested:
 
-- Applying the overlay to a live Security Onion, including the Salt state run and rule import.
+- Rule import and matching on a live install; the Sigma rules have not been run through the platform's Sigma conversion.
 - `platform/create-readonly-key.sh` (needs a live manager).
 - Building the container image, and running Spark and JupyterLab in it. Package versions in `analytics/requirements.txt` are ranges that have not been resolved in a build.
 - `td_hunt` against a live Elasticsearch.
