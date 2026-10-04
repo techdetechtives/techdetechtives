@@ -1,3 +1,5 @@
+<p align="center"><img src="branding/logo.svg" width="88" alt="TechDetechtives logo"></p>
+
 # TechDetechtives
 
 A detection and threat-hunting platform: network and host monitoring, alerting, hunting and case management, with a notebook and Spark workbench for deeper analysis.
@@ -89,6 +91,7 @@ Field names follow ECS, as on the platform. [docs/FIELD-MAPPING.md](docs/FIELD-M
 ## Customizing further
 
 - **Console pages:** edit `platform/branding/banner.md` and `motd.md`, then re-run the platform step.
+- **Logo, name and colours of the vulnerability dashboard:** see [branding/README.md](branding/README.md).
 - **Which engine for what:** Sigma rules match ingested logs. Suricata rules match network traffic. YARA rules match files extracted from traffic, not logs. Rules installed by the overlay arrive disabled; enable them under Detections.
 - **Detections:** add Sigma rules to `platform/detections/sigma/`, Suricata rules to `suricata/` (SIDs 1900001 to 1900999 are reserved for this rule set), YARA rules to `yara/`, then re-run the platform step.
 - **Notebooks:** add them under `analytics/notebooks/`. New notebooks in that folder are GPL-3.0 if they build on the existing ones.
@@ -100,7 +103,7 @@ Upgrade the platform with its own upgrade tool (`soup`). The overlay lives in th
 
 ## Status
 
-Version 0.3.0. What has and has not been exercised is listed in [MODIFICATIONS.md](MODIFICATIONS.md#test-status). In short: the overlay script, installers, notebook logic and static checks were tested against a mock platform tree and the sample data; the platform pages were confirmed on a live Security Onion 2.4.211; the container image builds, Spark, and live DFIR-IRIS and Greenbone runs have not been tested yet.
+Version 0.3.1. What has and has not been exercised is listed in [MODIFICATIONS.md](MODIFICATIONS.md#test-status). In short: the overlay script, installers, notebook logic and static checks were tested against a mock platform tree and the sample data; the platform pages were confirmed on a live Security Onion 2.4.211; the container image builds, Spark, and live DFIR-IRIS and Greenbone runs have not been tested yet.
 
 ## Licence
 

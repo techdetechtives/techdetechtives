@@ -66,7 +66,7 @@ Added in version 0.3.0, 2026-10-04. Original work; nothing here modifies Securit
 
 ## Test status
 
-As of 0.3.0.
+As of 0.3.1.
 
 Tested:
 
@@ -81,7 +81,7 @@ Tested:
 
 - Forwarder: 17 automated tests against local stand-ins for the platform and DFIR-IRIS, covering severity filtering, one ticket per alert, no duplicates across cycles and restarts, late-arriving alerts, outages, rejected alerts, the per-cycle cap, thousands of alerts sharing one timestamp, ticket contents and credentials.
 - `ticketing/setup-iris.sh`: fetching DFIR-IRIS 2.4.29, secret generation, re-run behaviour and the TLS certificate, with a stand-in for Docker. The forwarder was confirmed to trust that certificate and to refuse others.
-- Vulnerability connector: 28 automated tests against local stand-ins for Greenbone, the platform and DFIR-IRIS, covering report sync, the "currently open" view, platform delivery without duplicates, ticket rules, outages, sign-in, markup and spreadsheet-formula injection from scan text, and CSV export.
+- Vulnerability connector: 33 automated tests against local stand-ins for Greenbone, the platform and DFIR-IRIS, covering report sync, the "currently open" view, platform delivery without duplicates, ticket rules, outages, sign-in, markup and spreadsheet-formula injection from scan text, CSV export, and branding (custom name, colours and logo, with safe fallbacks).
 - Dashboard and reports pages: rendered with synthetic scan data and checked by eye in light and dark mode and at a narrow width. The severity colours pass an automated check for colour-blind readers.
 - `vulnerability/setup-greenbone.sh`: fetching the pinned setup, the generated override (confirmed with `docker compose config` to publish only port 9443), certificate, secrets and re-runs, with a stand-in for Docker.
 
