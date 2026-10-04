@@ -1,0 +1,34 @@
+# TechDetechtives alert-to-ticket forwarder.
+# Copyright (c) 2026 TechDetechtives. MIT licence (see LICENSE).
+#
+# Reads alerts from the platform and creates one DFIR-IRIS alert for each.
+# DFIR-IRIS itself runs from its own Compose project, which
+# ticketing/setup-iris.sh fetches and starts.
+#
+# Start with:  scripts/install.sh ticketing
+
+name: techdetechtives-ticketing
+
+services:
+  td-forwarder:
+    build: ./forwarder
+    image: techdetechtives/forwarder:0.2.0
+    container_name: td-forwarder
+    env_file:
+      - ../config/techdetechtives.env
+    # Host networking so the forwarder reaches DFIR-IRIS on this host and the
+    # platform manager on the internal network without extra port mappings.
+    network_mode: host
+    volumes:
+      - td-forwarder-state:/state
+      - ../analytics/certs:/certs:ro
+      - ./certs:/iris-certs:ro
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-file: "5"
+        max-size: "5m"
+
+volumes:
+  td-forwarder-state:

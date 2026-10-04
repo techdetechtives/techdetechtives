@@ -1,6 +1,6 @@
 # Notices
 
-TechDetechtives combines original work with two upstream projects. Each part keeps its own licence. This file is not legal advice.
+TechDetechtives combines original work with three upstream projects. Each part keeps its own licence. This file is not legal advice.
 
 ## 1. Security Onion (platform base)
 
@@ -33,10 +33,21 @@ Elasticsearch, Kibana and the other Elastic components shipped with the platform
 
 TechDetechtives is not affiliated with or endorsed by the HELK authors.
 
-## 3. Original TechDetechtives work
+## 3. DFIR-IRIS (ticketing)
 
-Everything outside `analytics/` (the platform overlay, rules, scripts and documentation) is original work, Copyright (c) 2026 TechDetechtives, under the MIT licence in `LICENSE`.
+- Project: DFIR-IRIS, https://github.com/dfir-iris/iris-web
+- Copyright DFIR-IRIS and contributors
+- Licence: GNU Lesser General Public License v3.0
+- Version installed: see `upstream.lock`
+
+DFIR-IRIS is installed unmodified. `ticketing/setup-iris.sh` fetches it from its own repository at install time into `ticketing/iris-web/`, where its licence file stays with it; its code is not included in this repository. The setup script supplies configuration only: generated secrets, a TLS certificate, a host name and a port. The TechDetechtives forwarder is a separate program that talks to DFIR-IRIS over its HTTP API.
+
+TechDetechtives is not affiliated with or endorsed by the DFIR-IRIS project.
+
+## 4. Original TechDetechtives work
+
+Everything outside `analytics/` (the platform overlay, rules, ticket forwarder, scripts and documentation) is original work, Copyright (c) 2026 TechDetechtives, under the MIT licence in `LICENSE`.
 
 ## How the parts are kept separate
 
-The platform and the analytics workbench are separate programs on separate hosts. They communicate only over the platform's Elasticsearch HTTP API, with a read-only key. No GPL-licensed code is combined with Elastic-licensed code, and no Elastic-licensed code is copied into this repository.
+The platform, the analytics workbench, the ticket forwarder and DFIR-IRIS are separate programs. The workbench and the forwarder read from the platform only over its Elasticsearch HTTP API, with a read-only key, and the forwarder writes to DFIR-IRIS only over its HTTP API. No GPL-licensed code is combined with Elastic-licensed code, and no Elastic-licensed code is copied into this repository.

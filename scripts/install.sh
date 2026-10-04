@@ -9,6 +9,11 @@
 #        Run on the analytics host. Builds and starts the notebook workbench.
 #   scripts/install.sh analytics-down
 #        Stop the workbench (notebooks and data are kept).
+#   scripts/install.sh ticketing [--name HOSTNAME] [--ip ADDRESS] [--port 8443]
+#        Run on the analytics host. Installs DFIR-IRIS on this host and starts
+#        the forwarder that opens a ticket for every platform alert.
+#   scripts/install.sh ticketing-down
+#        Stop the forwarder and DFIR-IRIS (tickets are kept).
 #
 # Security Onion itself is not installed by this script. Install it first from
 # the official ISO or installer, then run the platform step.
@@ -22,7 +27,7 @@ COMPOSE_FILE="$ROOT/analytics/docker-compose.yml"
 log()  { printf '[techdetechtives] %s\n' "$*"; }
 warn() { printf '[techdetechtives] WARNING: %s\n' "$*" >&2; }
 die()  { printf '[techdetechtives] ERROR: %s\n' "$*" >&2; exit 1; }
-usage() { sed -n '5,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '5,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 env_value() {
   # Read KEY from the env file without sourcing it.
@@ -93,10 +98,45 @@ cmd_analytics_down() {
   compose down
 }
 
+forwarder_compose() {
+  docker compose -f "$ROOT/ticketing/docker-compose.yml" --env-file "$ENV_FILE" "$@"
+}
+
+cmd_ticketing() {
+  require_docker
+  "$ROOT/ticketing/setup-iris.sh" "$@"
+  if [[ -z "$(env_value TD_ES_HOST)" || -z "$(env_value TD_ES_API_KEY)" ]]; then
+    warn "DFIR-IRIS is running, but the forwarder was not started: TD_ES_HOST and TD_ES_API_KEY are empty."
+    warn "Fill them in $ENV_FILE (see platform/create-readonly-key.sh) and re-run this command."
+    return 0
+  fi
+  local cert
+  cert="$(env_value TD_ES_CA_CERT)"
+  if [[ "$cert" == /certs/* && ! -f "$ROOT/analytics/certs/${cert#/certs/}" ]]; then
+    die "CA certificate analytics/certs/${cert#/certs/} is missing. Copy /etc/pki/ca.crt from the manager to that path."
+  fi
+  log "building and starting the alert-to-ticket forwarder"
+  forwarder_compose up -d --build
+  local minimum
+  minimum="$(env_value TD_TICKET_MIN_SEVERITY)"
+  log "forwarder started. Tickets are created for new alerts at severity ${minimum:-2} and above (1 low, 2 medium, 3 high, 4 critical)."
+  log "check it with: scripts/verify.sh ticketing"
+}
+
+cmd_ticketing_down() {
+  require_docker
+  [[ -f "$ENV_FILE" ]] && forwarder_compose down
+  if [[ -d "$ROOT/ticketing/iris-web/.git" ]]; then
+    (cd "$ROOT/ticketing/iris-web" && docker compose down)
+  fi
+}
+
 case "${1:-}" in
   platform)       shift; exec "$ROOT/platform/apply-overlay.sh" apply "$@" ;;
   analytics)      cmd_analytics ;;
   analytics-down) cmd_analytics_down ;;
+  ticketing)      shift; cmd_ticketing "$@" ;;
+  ticketing-down) cmd_ticketing_down ;;
   -h|--help)      usage ;;
   *)              usage >&2; exit 2 ;;
 esac

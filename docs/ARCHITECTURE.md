@@ -18,9 +18,15 @@
                                     | CA-verified, firewall host group
                                     v
         +--------------------------------------------------------+
-        |  ANALYTICS WORKBENCH  (this repo, derived from HELK)   |
-        |  JupyterLab - PySpark (local) - pandas - NetworkX      |
-        |  td_hunt library - hunting notebooks                   |
+        |  ANALYTICS HOST                                        |
+        |                                                        |
+        |  Workbench (this repo, derived from HELK)              |
+        |    JupyterLab - PySpark (local) - pandas - NetworkX    |
+        |    td_hunt library - hunting notebooks                 |
+        |                                                        |
+        |  Ticketing                                             |
+        |    forwarder (this repo) --HTTPS API--> DFIR-IRIS      |
+        |    one ticket per alert, medium severity and above     |
         +--------------------------------------------------------+
 ```
 
@@ -34,6 +40,14 @@ A fork that copies Security Onion's code and merges HELK into it was considered 
 4. **Overlap.** HELK's Elasticsearch, Logstash, Kibana and Kafka duplicate what the platform already runs, at much older versions. Only HELK's analytics idea (notebooks and Spark over hunt data) adds something, so only that part is carried over.
 
 If you later need to change platform code itself, fork the upstream repository separately, keep that fork under the Elastic License 2.0 with its notices, and point this overlay at it. `scripts/fetch-upstream.sh` fetches the exact upstream commits for comparison.
+
+## Ticketing flow
+
+1. Every 30 seconds the forwarder searches the platform for events tagged as alerts at or above the configured severity, using the read-only key.
+2. For each one it posts an alert to DFIR-IRIS over HTTPS, verified against the certificate generated at install.
+3. It records what it sent in a small state file on a Docker volume. It re-reads the last ten minutes on every pass to catch alerts that were indexed late, and the state file stops those being ticketed twice.
+
+DFIR-IRIS is installed on the analytics host from its own repository at a pinned version, unmodified. See `ticketing/README.md`.
 
 ## Data flow
 
