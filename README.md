@@ -11,6 +11,7 @@ TechDetechtives is a **modified deployment built on Security Onion**, combined w
 | Platform overlay | `platform/` | Branded console pages and the TechDetechtives rule set, applied to an installed Security Onion | Security Onion 3.3.0 (not copied here) | Overlay files: MIT. Security Onion itself: Elastic License 2.0 |
 | Analytics workbench | `analytics/` | Jupyter and Spark container, hunting notebooks, `td_hunt` helper library | HELK (modified) | GPL-3.0 |
 | Ticketing | `ticketing/` | Opens a DFIR-IRIS ticket for every platform alert; installs DFIR-IRIS on your own host | DFIR-IRIS 2.4.29 (fetched at install, not copied here) | Forwarder: MIT. DFIR-IRIS itself: LGPL-3.0 |
+| Vulnerability scanning | `vulnerability/` | Installs Greenbone (OpenVAS) on your own host; vulnerability dashboard, reports pages, findings into the platform, tickets for findings | Greenbone Community Edition (fetched at install, not copied here) | Connector: MIT. Greenbone itself: AGPL-3.0 and GPL-2.0 |
 | Scripts and docs | `scripts/`, `docs/` | Install, verify, fetch upstream | Original | MIT |
 
 Security Onion's code and image are **not** in this repository. You install Security Onion from its official ISO or installer, and this repository customizes that installation through the customization points Security Onion provides. That keeps upgrades working and keeps the two licences separate. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains the design.
@@ -63,6 +64,15 @@ scripts/verify.sh ticketing
 
 This installs DFIR-IRIS on this host with its own generated passwords and TLS certificate, then starts a forwarder that opens one DFIR-IRIS alert for every platform alert at medium severity or above. Everything stays on your internal network. See [ticketing/README.md](ticketing/README.md) for settings, sign-in and hardening.
 
+### 5. Vulnerability scanning (on the ticketing machine)
+
+```bash
+scripts/install.sh vulnerability --name <name analysts will use> --ip <this host's internal IP>
+scripts/verify.sh vulnerability
+```
+
+This installs Greenbone Community Edition (OpenVAS) on this host and starts the TechDetechtives vulnerability dashboard and reports pages. Findings can also be sent into the platform and opened as DFIR-IRIS tickets. See [vulnerability/README.md](vulnerability/README.md).
+
 **Try it without a platform:** leave `TD_ES_HOST` empty and run step 3 alone. The notebooks then run on bundled synthetic sample data.
 
 ## Notebooks
@@ -90,7 +100,7 @@ Upgrade the platform with its own upgrade tool (`soup`). The overlay lives in th
 
 ## Status
 
-Version 0.2.0. What has and has not been exercised is listed in [MODIFICATIONS.md](MODIFICATIONS.md#test-status). In short: the overlay script, installers, notebook logic and static checks were tested against a mock platform tree and the sample data; the platform pages were confirmed on a live Security Onion 2.4.211; the container image builds, Spark, and a live DFIR-IRIS run have not been tested yet.
+Version 0.3.0. What has and has not been exercised is listed in [MODIFICATIONS.md](MODIFICATIONS.md#test-status). In short: the overlay script, installers, notebook logic and static checks were tested against a mock platform tree and the sample data; the platform pages were confirmed on a live Security Onion 2.4.211; the container image builds, Spark, and live DFIR-IRIS and Greenbone runs have not been tested yet.
 
 ## Licence
 

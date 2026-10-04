@@ -17,6 +17,12 @@ Notebook-based hunting with pandas, Spark SQL and process-tree graphs runs on th
 
 It reads from this platform with a read-only key and cannot change data here.
 
+## Tickets and vulnerabilities
+
+- Tickets: every alert at medium severity or above opens a ticket in the ticketing system: @@TD_TICKETS_URL@@
+- Vulnerability dashboard and scan reports: @@TD_VULN_URL@@
+- Scan findings are also stored here. Open them in [Dashboards](/#/dashboards?q=event.dataset%3Agreenbone.result%20%7C%20groupby%20vulnerability.severity%20%7C%20groupby%20host.ip%20%7C%20groupby%20rule.name%20%7C%20groupby%20vulnerability.id).
+
 ## Endpoint coverage
 
 Deploy the Elastic Agent to endpoints from the [Downloads](/#/downloads) page.

@@ -10,13 +10,14 @@
 # licence-key features.
 #
 # Usage:
-#   sudo ./apply-overlay.sh apply  [--dry-run] [--no-salt] [--jupyter-url URL]
+#   sudo ./apply-overlay.sh apply  [--dry-run] [--no-salt] [--jupyter-url URL] [--tickets-url URL] [--vuln-url URL]
 #   sudo ./apply-overlay.sh revert [--dry-run] [--no-salt]
 #   sudo ./apply-overlay.sh status
 
 set -euo pipefail
 
 TESTED_SO_VERSION="3.3.0"
+CHECKED_SO_MAJORS="2 3"   # 2.4.211 applied live; 3.3.0 checked against its source
 
 # Paths on a Security Onion manager. Overridable for testing.
 SO_VERSION_FILE="${TD_SO_VERSION_FILE:-/etc/soversion}"
@@ -39,6 +40,8 @@ COMMAND=""
 DRY_RUN=0
 RUN_SALT=1
 JUPYTER_URL="${TD_JUPYTER_URL:-https://ANALYTICS-HOST:8888 (ask your administrator)}"
+TICKETS_URL="${TD_TICKETS_URL:-not installed yet (ask your administrator)}"
+VULN_URL="${TD_VULN_URL:-not installed yet (ask your administrator)}"
 
 log()  { printf '[techdetechtives] %s\n' "$*"; }
 warn() { printf '[techdetechtives] WARNING: %s\n' "$*" >&2; }
@@ -85,9 +88,9 @@ preflight() {
   [[ -d "$SO_LOCAL" ]] || die "$SO_LOCAL not found. Run this on the manager node."
   local version
   version="$(tr -d '[:space:]' < "$SO_VERSION_FILE")"
-  log "Security Onion version: $version (overlay tested against $TESTED_SO_VERSION)"
-  if [[ "${version%%.*}" != "${TESTED_SO_VERSION%%.*}" ]]; then
-    warn "major version differs from the tested one; check MODIFICATIONS.md before continuing"
+  log "Security Onion version: $version (overlay checked against 2.4.211 and $TESTED_SO_VERSION)"
+  if [[ " $CHECKED_SO_MAJORS " != *" ${version%%.*} "* ]]; then
+    warn "this major version has not been checked; read MODIFICATIONS.md before continuing"
   fi
 }
 
@@ -139,8 +142,10 @@ install_branding() {
       continue
     fi
     tmp="$(mktemp)"
-    # Only substitution in the files: where the analytics workbench lives.
-    sed "s|@@TD_JUPYTER_URL@@|${JUPYTER_URL//|/\\|}|g" "$HERE/branding/$f" > "$tmp"
+    # Only substitutions in the files: where the other TechDetechtives parts live.
+    sed -e "s|@@TD_JUPYTER_URL@@|${JUPYTER_URL//|/\\|}|g" \
+        -e "s|@@TD_TICKETS_URL@@|${TICKETS_URL//|/\\|}|g" \
+        -e "s|@@TD_VULN_URL@@|${VULN_URL//|/\\|}|g" "$HERE/branding/$f" > "$tmp"
     install -m 0644 "$tmp" "$SOC_FILES/$f"
     rm -f "$tmp"
     own "$SOC_FILES/$f"
@@ -287,6 +292,8 @@ while [[ $# -gt 0 ]]; do
     --dry-run) DRY_RUN=1 ;;
     --no-salt) RUN_SALT=0 ;;
     --jupyter-url) shift; [[ $# -gt 0 ]] || die "--jupyter-url needs a value"; JUPYTER_URL="$1" ;;
+    --tickets-url) shift; [[ $# -gt 0 ]] || die "--tickets-url needs a value"; TICKETS_URL="$1" ;;
+    --vuln-url)    shift; [[ $# -gt 0 ]] || die "--vuln-url needs a value"; VULN_URL="$1" ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; die "unknown argument: $1" ;;
   esac

@@ -7,6 +7,7 @@
 #   sudo scripts/verify.sh platform   On the manager: is the overlay installed?
 #   scripts/verify.sh analytics   On the analytics host: is the workbench healthy?
 #   scripts/verify.sh ticketing   On the analytics host: are DFIR-IRIS and the forwarder working?
+#   scripts/verify.sh vulnerability   On the ticketing machine: are Greenbone and its connector working?
 
 set -euo pipefail
 
@@ -17,7 +18,7 @@ FAILED=0
 
 pass() { printf '[ ok ] %s\n' "$*"; }
 fail() { printf '[FAIL] %s\n' "$*"; FAILED=1; }
-usage() { sed -n '5,9p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '5,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 cmd_repo() {
   local f
@@ -86,6 +87,11 @@ PY
     else
       fail "forwarder tests (run: python3 -m unittest discover -s ticketing/tests -v)"
     fi
+    if python3 -m unittest discover -s "$ROOT/vulnerability/tests" >/dev/null 2>&1; then
+      pass "vulnerability connector tests"
+    else
+      fail "vulnerability connector tests (run: python3 -m unittest discover -s vulnerability/tests -v)"
+    fi
   else
     printf '[skip] python3 not found; content checks skipped\n'
   fi
@@ -136,11 +142,42 @@ cmd_ticketing() {
   fi
 }
 
+cmd_vulnerability() {
+  command -v docker >/dev/null 2>&1 || { fail "docker is not installed"; return; }
+  [[ -f "$ENV_FILE" ]] || { fail "$ENV_FILE not found; run scripts/install.sh vulnerability first"; return; }
+  if [[ -f "$ROOT/vulnerability/greenbone/compose.yaml" ]]; then
+    local gb=(docker compose -p techdetechtives-greenbone -f "$ROOT/vulnerability/greenbone/compose.yaml" -f "$ROOT/vulnerability/greenbone/override.yaml")
+    local service
+    for service in gvmd gsad nginx ospd-openvas pg-gvm redis-server; do
+      if [[ -n "$("${gb[@]}" ps --status running -q "$service" 2>/dev/null)" ]]; then
+        pass "Greenbone service $service is running"
+      else
+        fail "Greenbone service $service is not running"
+      fi
+    done
+  else
+    fail "Greenbone is not installed from this repository (run scripts/install.sh vulnerability)"
+  fi
+  local compose=(docker compose -f "$ROOT/vulnerability/docker-compose.yml" --env-file "$ENV_FILE")
+  if [[ -n "$("${compose[@]}" ps --status running -q td-vuln 2>/dev/null)" ]]; then
+    pass "td-vuln container is running"
+  else
+    fail "td-vuln container is not running (docker logs td-vuln)"
+    return
+  fi
+  if "${compose[@]}" exec -T td-vuln python -m td_vuln.main --check; then
+    pass "connector can reach Greenbone and its configured outputs"
+  else
+    fail "connector connection check"
+  fi
+}
+
 case "${1:-}" in
   repo)      cmd_repo ;;
   platform)  cmd_platform ;;
   analytics) cmd_analytics ;;
   ticketing) cmd_ticketing ;;
+  vulnerability) cmd_vulnerability ;;
   -h|--help) usage; exit 0 ;;
   *)         usage >&2; exit 2 ;;
 esac

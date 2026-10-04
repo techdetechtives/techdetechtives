@@ -3,7 +3,7 @@
 # Copyright (c) 2026 TechDetechtives. MIT licence (see LICENSE).
 #
 # Usage:
-#   sudo scripts/install.sh platform [--dry-run] [--no-salt] [--jupyter-url URL]
+#   sudo scripts/install.sh platform [--dry-run] [--no-salt] [--jupyter-url URL] [--tickets-url URL] [--vuln-url URL]
 #        Run on the Security Onion manager. Applies branding and detections.
 #   scripts/install.sh analytics
 #        Run on the analytics host. Builds and starts the notebook workbench.
@@ -14,6 +14,11 @@
 #        the forwarder that opens a ticket for every platform alert.
 #   scripts/install.sh ticketing-down
 #        Stop the forwarder and DFIR-IRIS (tickets are kept).
+#   scripts/install.sh vulnerability [--name HOSTNAME] [--ip ADDRESS] [--port 9443] [--dash-port 8444]
+#        Run on the ticketing machine. Installs Greenbone (OpenVAS) on this host and
+#        starts the connector with the vulnerability dashboard and reports pages.
+#   scripts/install.sh vulnerability-down
+#        Stop the connector and Greenbone (scan data is kept).
 #
 # Security Onion itself is not installed by this script. Install it first from
 # the official ISO or installer, then run the platform step.
@@ -27,7 +32,7 @@ COMPOSE_FILE="$ROOT/analytics/docker-compose.yml"
 log()  { printf '[techdetechtives] %s\n' "$*"; }
 warn() { printf '[techdetechtives] WARNING: %s\n' "$*" >&2; }
 die()  { printf '[techdetechtives] ERROR: %s\n' "$*" >&2; exit 1; }
-usage() { sed -n '5,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '5,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 env_value() {
   # Read KEY from the env file without sourcing it.
@@ -131,12 +136,51 @@ cmd_ticketing_down() {
   fi
 }
 
+vuln_compose() {
+  docker compose -f "$ROOT/vulnerability/docker-compose.yml" --env-file "$ENV_FILE" "$@"
+}
+
+cmd_vulnerability() {
+  require_docker
+  "$ROOT/vulnerability/setup-greenbone.sh" "$@"
+  if [[ -z "$(env_value TD_ES_INGEST_API_KEY)" ]]; then
+    warn "TD_ES_INGEST_API_KEY is empty: findings will show on the dashboard but will not be sent to the platform."
+    warn "Create the key on the manager with platform/create-ingest-key.sh, add it to $ENV_FILE, and re-run this command."
+  elif [[ -z "$(env_value TD_ES_HOST)" ]]; then
+    die "TD_ES_INGEST_API_KEY is set but TD_ES_HOST is empty in $ENV_FILE"
+  else
+    local cert
+    cert="$(env_value TD_ES_CA_CERT)"
+    if [[ "$cert" == /certs/* && ! -f "$ROOT/analytics/certs/${cert#/certs/}" ]]; then
+      die "CA certificate analytics/certs/${cert#/certs/} is missing. Copy /etc/pki/ca.crt from the manager to that path."
+    fi
+  fi
+  if [[ -z "$(env_value TD_IRIS_API_KEY)" ]]; then
+    warn "DFIR-IRIS is not set up on this host: vulnerability tickets are off. Run scripts/install.sh ticketing first to enable them."
+  fi
+  log "building and starting the vulnerability connector"
+  vuln_compose up -d --build
+  log "dashboard: $(env_value TD_VULN_PUBLIC_URL)  (user $(env_value TD_VULN_USER), password = TD_VULN_PASSWORD in $ENV_FILE)"
+  log "check it with: scripts/verify.sh vulnerability"
+}
+
+cmd_vulnerability_down() {
+  require_docker
+  [[ -f "$ENV_FILE" ]] && vuln_compose down
+  if [[ -f "$ROOT/vulnerability/greenbone/compose.yaml" ]]; then
+    docker compose -p techdetechtives-greenbone -f "$ROOT/vulnerability/greenbone/compose.yaml" \
+      -f "$ROOT/vulnerability/greenbone/override.yaml" down
+  fi
+}
+
 case "${1:-}" in
   platform)       shift; exec "$ROOT/platform/apply-overlay.sh" apply "$@" ;;
   analytics)      cmd_analytics ;;
   analytics-down) cmd_analytics_down ;;
   ticketing)      shift; cmd_ticketing "$@" ;;
   ticketing-down) cmd_ticketing_down ;;
+  vulnerability)      shift; cmd_vulnerability "$@" ;;
+  vulnerability-down) cmd_vulnerability_down ;;
   -h|--help)      usage ;;
   *)              usage >&2; exit 2 ;;
 esac
