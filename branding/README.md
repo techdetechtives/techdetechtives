@@ -10,7 +10,7 @@ The TechDetechtives artwork, and where each file is used.
 | `avatar.png` | 500 x 500 | Square emblem for the GitHub account picture. |
 | `social-preview.png` | 1280 x 640 | The image GitHub shows when the repository link is shared. |
 
-The artwork was supplied by the project owner. The original also showed the logos of other products around the emblem. These files leave those out: they are other organisations' trademarks, and a project logo that contains them would suggest an affiliation that does not exist (see `NOTICE.md`).
+The artwork was supplied by the project owner. Its wordmark was re-lettered to the project's spelling, TechDetechtives, using the artwork's own letters. The original also showed the logos of other products around the emblem. These files leave those out: they are other organisations' trademarks, and a project logo that contains them would suggest an affiliation that does not exist (see `NOTICE.md`).
 
 ## Where the brand appears
 
