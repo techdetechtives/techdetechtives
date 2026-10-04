@@ -3,7 +3,7 @@
 # Copyright (c) 2026 TechDetechtives. MIT licence (see LICENSE).
 #
 # Usage:
-#   sudo scripts/install.sh platform [--dry-run] [--no-salt] [--jupyter-url URL] [--tickets-url URL] [--vuln-url URL]
+#   sudo scripts/install.sh platform [--dry-run] [--no-salt] [--jupyter-url URL] [--tickets-url URL] [--vuln-url URL] [--brand-image-url URL|none]
 #        Run on the Security Onion manager. Applies branding and detections.
 #   scripts/install.sh analytics
 #        Run on the analytics host. Builds and starts the notebook workbench.

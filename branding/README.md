@@ -1,33 +1,53 @@
 # Branding
 
-The TechDetechtives name, logo and colours used by the vulnerability dashboard live here and in `config/techdetechtives.env`.
+The TechDetechtives artwork, and where each file is used.
 
-| What | Where | Default |
+| File | Size | Used for |
 | --- | --- | --- |
-| Logo | `branding/logo.svg` | The TechDetechtives mark: fingerprint ridges that end in circuit pads |
-| Name | `TD_BRAND_NAME` | `TechDetechtives` |
-| Header band colour | `TD_BRAND_HEADER` | `#14213d` (ink navy) |
-| Accent colour | `TD_BRAND_ACCENT` | `#2ec4b6` (teal) |
+| `banner.png` | 960 x 820 | The full emblem with the wordmark. Shown at the top of the repository README. |
+| `banner-480.png` | 480 x 410 | The same emblem, smaller. Shown at the top of the platform's overview page. |
+| `logo.png` | 256 x 256 | The square mark (detective and magnifier). Header logo and browser tab icon of the vulnerability dashboard. |
+| `avatar.png` | 500 x 500 | Square emblem for the GitHub account picture. |
+| `social-preview.png` | 1280 x 640 | The image GitHub shows when the repository link is shared. |
 
-The name appears in the header, the browser tab, the footer and the sign-in prompt. The logo appears in the header and as the tab icon.
+The artwork was supplied by the project owner. The original also showed the logos of other products around the emblem. These files leave those out: they are other organisations' trademarks, and a project logo that contains them would suggest an affiliation that does not exist (see `NOTICE.md`).
 
-## Using your own logo
+## Where the brand appears
 
-1. Put the file in this folder. SVG is best; PNG, JPG and WebP also work. Keep it under 512 KB and roughly square, since it is shown at 30 by 30 pixels.
-2. If the file is not called `logo.svg`, set `TD_BRAND_LOGO=/brand/<file name>` in `config/techdetechtives.env`.
-3. Re-run `scripts/install.sh vulnerability` on the ticketing machine.
+- **GitHub:** the README banner comes from this folder. The account picture and the social preview are set by hand in GitHub's settings, using `avatar.png` and `social-preview.png`.
+- **Vulnerability dashboard:** logo, name and colours in the header band, the tab icon, the footer and the sign-in prompt.
+- **Platform console:** the emblem at the top of the overview page, and the name on the login banner and overview page.
 
-If the file is missing, too large or of another type, the dashboard falls back to the built-in mark rather than showing a broken image.
+## Dashboard settings
 
-## Changing the colours
+Set in `config/techdetechtives.env`, then re-run `scripts/install.sh vulnerability` on the ticketing machine.
 
-Set `TD_BRAND_HEADER` and `TD_BRAND_ACCENT` to colours written as `#rrggbb`, then re-run the install command. The header text switches between white and near-black by itself to stay readable on the band colour you choose. Pick an accent that stands out against the band.
+| Setting | What it controls | Default |
+| --- | --- | --- |
+| `TD_BRAND_NAME` | Name in the header, tab, footer and sign-in prompt | `TechDetechtives` |
+| `TD_BRAND_LOGO` | Logo file in this folder, written as `/brand/<file name>` | `/brand/logo.png` |
+| `TD_BRAND_HEADER` | Header band colour, as `#rrggbb` | `#0b0b0d` (black) |
+| `TD_BRAND_ACCENT` | Accent line colour, as `#rrggbb` | `#f60411` (the emblem's red) |
 
-Keep brand colours away from the reds and oranges: those carry severity in the charts.
+A logo file can be SVG, PNG, JPG or WebP, up to 512 KB, roughly square. If it is missing or unusable the dashboard falls back to a built-in mark rather than showing a broken image. The header text switches between white and near-black by itself to stay readable on the band colour.
+
+The brand red sits close to the reds that carry severity in the charts. It is used only in the header band, where no chart can be mistaken for it.
+
+## The image on the platform's overview page
+
+The platform console can only show images that the analyst's browser fetches from another host, so the overview page loads `banner-480.png` from the public repository. Two consequences:
+
+- Analysts' browsers need internet access for the image to appear. Without it the page shows a broken-image icon.
+- Each page view makes a request to GitHub.
+
+To host the image somewhere else, or to leave it out, re-apply the overlay on the manager:
+
+```bash
+sudo scripts/install.sh platform --brand-image-url https://your-internal-host/banner-480.png
+sudo scripts/install.sh platform --brand-image-url none
+```
 
 ## What is not rebranded
 
-- **The Security Onion console** keeps its own logo and licence notices. The Elastic License 2.0 forbids removing the licensor's notices, and its name and logo are registered trademarks. The login banner and overview page carry the TechDetechtives name instead (`platform/branding/`).
+- **The Security Onion console** keeps its own logo and licence notices. The Elastic License 2.0 forbids removing the licensor's notices, and its name and logo are registered trademarks.
 - **DFIR-IRIS and Greenbone** run unmodified with their own interfaces.
-
-The logo in this folder is original work for this project, under the repository's MIT licence.

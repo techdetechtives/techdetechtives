@@ -59,6 +59,8 @@ Greenbone is installed unmodified from its official container images. `vulnerabi
 
 Everything outside `analytics/` (the platform overlay, rules, ticket forwarder, vulnerability connector and dashboard, scripts and documentation) is original work, Copyright (c) 2026 TechDetechtives, under the MIT licence in `LICENSE`.
 
+The TechDetechtives emblem in `branding/` was supplied by the project owner. It contains no other organisation's logo.
+
 ## How the parts are kept separate
 
 The platform, the analytics workbench, the ticket forwarder, DFIR-IRIS, Greenbone and the vulnerability connector are separate programs. The workbench and the forwarder read from the platform only over its Elasticsearch HTTP API, with a read-only key, and the forwarder writes to DFIR-IRIS only over its HTTP API. No GPL-licensed code is combined with Elastic-licensed code, and no Elastic-licensed code is copied into this repository.

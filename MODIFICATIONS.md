@@ -9,7 +9,7 @@ Applied by `platform/apply-overlay.sh` on the manager node. First applied in ver
 | What changes | Where on the platform | How |
 | --- | --- | --- |
 | Login banner | `/opt/so/saltstack/local/salt/soc/files/soc/banner.md` | Replaced with the TechDetechtives banner. Previous file backed up. |
-| Console overview page | `/opt/so/saltstack/local/salt/soc/files/soc/motd.md` | Replaced with the TechDetechtives overview. Previous file backed up. |
+| Console overview page | `/opt/so/saltstack/local/salt/soc/files/soc/motd.md` | Replaced with the TechDetechtives overview, which shows the TechDetechtives emblem (an image loaded from this repository on GitHub, or from an address you choose). Previous file backed up. |
 | Sigma rules | `/nsm/rules/custom-local-repos/local-sigma` | 4 rule files added and committed |
 | Suricata rules | `/nsm/rules/custom-local-repos/local-suricata` | 1 rule file (2 rules, SIDs 1900001 and 1900002) added and committed |
 | YARA rules | `/nsm/rules/custom-local-repos/local-yara` | 1 rule file added and committed |
@@ -66,7 +66,7 @@ Added in version 0.3.0, 2026-10-04. Original work; nothing here modifies Securit
 
 ## Test status
 
-As of 0.3.1.
+As of 0.4.0.
 
 Tested:
 
