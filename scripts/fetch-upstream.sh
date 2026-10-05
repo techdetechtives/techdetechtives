@@ -6,7 +6,9 @@
 # against new upstream releases. They are not part of this repository and keep
 # their own licences.
 #
-# Usage: scripts/fetch-upstream.sh
+# Usage: scripts/fetch-upstream.sh [name ...]
+#   With no names, fetches every project in upstream.lock. With names (the
+#   first column of upstream.lock), fetches only those.
 
 set -euo pipefail
 
@@ -15,6 +17,7 @@ mkdir -p "$ROOT/upstream"
 
 while IFS='|' read -r name repo branch commit version licence; do
   [[ -z "$name" || "$name" == \#* ]] && continue
+  if [[ $# -gt 0 && " $* " != *" $name "* ]]; then continue; fi
   dest="$ROOT/upstream/$name"
   if [[ ! -d "$dest/.git" ]]; then
     git init -q "$dest"

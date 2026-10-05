@@ -6,13 +6,15 @@
 # Onion manager, using only the customization points Security Onion provides:
 #   - the console's login banner and overview page (local Salt file overrides)
 #   - the local Sigma / Suricata / YARA rule repositories
+#   - the console settings that decide which rules are enabled on import
 # It does not change Security Onion code, its licence notices, its logo or its
 # licence-key features.
 #
 # Usage:
-#   sudo ./apply-overlay.sh apply  [--dry-run] [--no-salt] [--jupyter-url URL] [--tickets-url URL] [--vuln-url URL] [--brand-image-url URL|none]
+#   sudo ./apply-overlay.sh apply  [--dry-run] [--no-salt] [--no-auto-enable] [--jupyter-url URL] [--tickets-url URL] [--vuln-url URL] [--brand-image-url URL|none]
 #   sudo ./apply-overlay.sh revert [--dry-run] [--no-salt]
 #   sudo ./apply-overlay.sh status
+#   sudo ./apply-overlay.sh rules      (the TechDetechtives rules as the console sees them)
 
 set -euo pipefail
 
@@ -22,11 +24,14 @@ CHECKED_SO_MAJORS="2 3"   # 2.4.211 applied live; 3.3.0 checked against its sour
 # Paths on a Security Onion manager. Overridable for testing.
 SO_VERSION_FILE="${TD_SO_VERSION_FILE:-/etc/soversion}"
 SO_LOCAL="${TD_SO_LOCAL:-/opt/so/saltstack/local}"
+SO_DEFAULT="${TD_SO_DEFAULT:-/opt/so/saltstack/default}"
 RULE_REPOS="${TD_RULE_REPOS:-/nsm/rules/custom-local-repos}"
 BACKUP_ROOT="${TD_BACKUP_ROOT:-/nsm/backup/techdetechtives}"
 SO_USER="${TD_SO_USER:-socore}"
 
 SOC_FILES="$SO_LOCAL/salt/soc/files/soc"
+SOC_SETTINGS="$SO_LOCAL/pillar/soc/soc_soc.sls"          # the console's local settings
+SOC_DEFAULTS="$SO_DEFAULT/salt/soc/defaults.yaml"        # read only
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BRANDING_FILES=(banner.md motd.md)
 # engine : source folder : file glob : local repo name
@@ -39,6 +44,7 @@ RULE_SETS=(
 COMMAND=""
 DRY_RUN=0
 RUN_SALT=1
+AUTO_ENABLE=1
 JUPYTER_URL="${TD_JUPYTER_URL:-https://ANALYTICS-HOST:8888 (ask your administrator)}"
 TICKETS_URL="${TD_TICKETS_URL:-not installed yet (ask your administrator)}"
 VULN_URL="${TD_VULN_URL:-not installed yet (ask your administrator)}"
@@ -51,7 +57,7 @@ log()  { printf '[techdetechtives] %s\n' "$*"; }
 warn() { printf '[techdetechtives] WARNING: %s\n' "$*" >&2; }
 die()  { printf '[techdetechtives] ERROR: %s\n' "$*" >&2; exit 1; }
 
-usage() { sed -n '12,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '13,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 run() {
   # Run a command, or only print it in dry-run mode.
@@ -100,7 +106,8 @@ preflight() {
 
 latest_backup() {
   [[ -d "$BACKUP_ROOT" ]] || return 0
-  find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1
+  # Only the dated page backups; the settings backups live in their own folder.
+  find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*Z' | sort | tail -n 1
 }
 
 overlay_pages_installed() {
@@ -240,6 +247,75 @@ status_rules() {
   [[ $present -eq $total ]]
 }
 
+rule_settings() {
+  # enable | disable | status: whether rules from the local Sigma and YARA
+  # repositories are switched on when the console imports them. Without this
+  # the console imports the TechDetechtives rules switched off.
+  local action="$1" out
+  if ! python3 -c 'import yaml' >/dev/null 2>&1; then
+    warn "python3 with the yaml module not found; leaving the rule settings alone"
+    return 0
+  fi
+  if [[ ! -f "$SOC_DEFAULTS" || ! -d "$(dirname "$SOC_SETTINGS")" ]]; then
+    warn "console settings not found under $SO_LOCAL and $SO_DEFAULT; leaving the rule settings alone"
+    return 0
+  fi
+  if [[ "$action" == "status" ]]; then
+    out="$(python3 "$HERE/local_rules_setting.py" status "$SOC_SETTINGS" "$SOC_DEFAULTS" 2>&1)" || {
+      while IFS= read -r line; do log "enable on import, $line"; done <<< "$out"
+      return 1
+    }
+    log "local Sigma and YARA rules are enabled on import"
+    return 0
+  fi
+  if [[ $DRY_RUN -eq 1 ]]; then
+    printf '[dry-run] %s local Sigma and YARA rules on import in %s\n' "$action" "$SOC_SETTINGS"
+    return 0
+  fi
+  if out="$(python3 "$HERE/local_rules_setting.py" "$action" "$SOC_SETTINGS" "$SOC_DEFAULTS" \
+            --backup-dir "$BACKUP_ROOT/settings" 2>&1)"; then
+    log "rule settings ($action on import): $out"
+    [[ -f "$SOC_SETTINGS" ]] && own "$SOC_SETTINGS"
+  else
+    warn "rule settings were not changed: $out"
+    warn "set them by hand: Administration -> Configuration -> soc -> config -> server -> modules"
+  fi
+  return 0
+}
+
+console_rules() {
+  # The TechDetechtives rules as the console has them, read from its
+  # detection index. Read only. Returns 1 when any rule is switched off.
+  local query response count off
+  command -v so-elasticsearch-query >/dev/null 2>&1 || { log "so-elasticsearch-query not found; cannot list rules"; return 0; }
+  command -v jq >/dev/null 2>&1 || { log "jq not found; cannot list rules"; return 0; }
+  query='{"size":200,"_source":["so_detection.title","so_detection.engine","so_detection.isEnabled","so_detection.ruleset"],
+    "query":{"bool":{"filter":[{"term":{"so_kind":"detection"}}],"minimum_should_match":1,"should":[
+    {"terms":{"so_detection.ruleset":["local-sigma","local-yara","local-rules","local-suricata"]}},
+    {"wildcard":{"so_detection.title":{"value":"techdetechtives*","case_insensitive":true}}}]}}}'
+  response="$(so-elasticsearch-query 'so-detection/_search' -XPOST -d "$query" 2>/dev/null)" || response=""
+  if ! jq -e '.hits.hits' >/dev/null 2>&1 <<< "$response"; then
+    log "could not read the console's detection list"
+    return 0
+  fi
+  count="$(jq '.hits.hits | length' <<< "$response")"
+  if [[ "$count" -eq 0 ]]; then
+    log "the console has not imported any local rules yet (Detections -> Options -> Full Update)"
+    return 1
+  fi
+  log "local rules in the console: $count"
+  jq -r '.hits.hits[]._source.so_detection
+         | "  \(if .isEnabled then "ENABLED " else "disabled" end)  \(.engine // "?")  \(.title // "?")"' <<< "$response" | sort
+  off="$(jq '[.hits.hits[]._source.so_detection | select(.isEnabled != true)] | length' <<< "$response")"
+  if [[ "$off" -gt 0 ]]; then
+    log "$off rule(s) switched off. In the console: Detections, search for"
+    log '  so_detection.ruleset:("local-sigma" OR "local-yara" OR "local-rules")'
+    log "then select all and choose Enable."
+    return 1
+  fi
+  return 0
+}
+
 apply_salt() {
   if [[ $RUN_SALT -eq 0 ]]; then
     log "skipping Salt (--no-salt); the console picks the pages up on its next scheduled sync"
@@ -255,9 +331,16 @@ cmd_apply() {
   backup_branding
   install_branding
   each_rule_set install_rules
+  if [[ $AUTO_ENABLE -eq 1 ]]; then
+    rule_settings enable
+  else
+    log "leaving the rule settings alone (--no-auto-enable)"
+  fi
   apply_salt
   log "done. New rules load at the next rule sync, or immediately from"
   log "Detections -> Options -> (engine) -> Full Update in the console."
+  log "Rules the console imported before this run keep their on/off state;"
+  log "check them with: sudo $0 rules"
 }
 
 cmd_revert() {
@@ -274,6 +357,7 @@ cmd_revert() {
     fi
   done
   each_rule_set remove_rules
+  rule_settings disable
   apply_salt
   log "reverted. The backup was left in place at $backup"
 }
@@ -290,14 +374,22 @@ cmd_status() {
     fi
   done
   each_rule_set status_rules || ok=1
+  rule_settings status || ok=1
+  console_rules || ok=1
   return $ok
+}
+
+cmd_rules() {
+  preflight
+  console_rules
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    apply|revert|status) COMMAND="$1" ;;
+    apply|revert|status|rules) COMMAND="$1" ;;
     --dry-run) DRY_RUN=1 ;;
     --no-salt) RUN_SALT=0 ;;
+    --no-auto-enable) AUTO_ENABLE=0 ;;
     --jupyter-url) shift; [[ $# -gt 0 ]] || die "--jupyter-url needs a value"; JUPYTER_URL="$1" ;;
     --tickets-url) shift; [[ $# -gt 0 ]] || die "--tickets-url needs a value"; TICKETS_URL="$1" ;;
     --vuln-url)    shift; [[ $# -gt 0 ]] || die "--vuln-url needs a value"; VULN_URL="$1" ;;
@@ -318,5 +410,6 @@ case "$COMMAND" in
   apply)  cmd_apply ;;
   revert) cmd_revert ;;
   status) cmd_status ;;
+  rules)  cmd_rules ;;
   *) usage >&2; exit 2 ;;
 esac

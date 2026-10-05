@@ -32,7 +32,7 @@ from typing import Any, Iterable, Optional, Union
 
 import pandas as pd
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 SAMPLE_DIR = Path(__file__).parent / "sample_data"
 
@@ -222,6 +222,10 @@ def spark_session(app: str = "TechDetechtives"):
         .master(cfg.spark_master)
         .config("spark.driver.memory", cfg.spark_driver_memory)
         .config("spark.sql.session.timeZone", "UTC")
+        # Local mode only: keep Spark's own ports off the network.
+        .config("spark.driver.bindAddress", "127.0.0.1")
+        .config("spark.driver.host", "127.0.0.1")
+        .config("spark.ui.enabled", "false")
         .config("spark.ui.showConsoleProgress", "false")
         .getOrCreate()
     )

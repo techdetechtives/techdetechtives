@@ -63,6 +63,14 @@ DFIR-IRIS is installed on the analytics host from its own repository at a pinned
 
 The connector shares no network port with Greenbone: it mounts Greenbone's socket volume read-write only to speak the management protocol, and runs with all Linux capabilities dropped except the one needed to open that socket. See `vulnerability/README.md`.
 
+## Detections and their tests
+
+Rules live in `platform/detections/` and reach the platform through its local rule repositories. The overlay also adds those repositories to the platform's "enable on import" settings, so new rules arrive switched on. Each Sigma rule is paired in `platform/detections/validation.yml` with a test that should make it fire, mostly Atomic Red Team tests named by id; the tests are run by hand on a lab endpoint. See `docs/DETECTION-VALIDATION.md`.
+
+## Analyst skills
+
+`skills/` holds guidance files for an AI assistant working alongside an analyst. They run nowhere on the platform: the assistant reads them on the analyst's own machine. Four describe this platform and its limits; the rest are a reviewed selection from a community library, copied unchanged and checked against a manifest. See `skills/README.md`.
+
 ## Data flow
 
 1. The platform collects and stores events in Elasticsearch data streams (`logs-*`).
