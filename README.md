@@ -28,7 +28,7 @@ Security Onion's code and image are **not** in this repository. You install Secu
 ### 1. Platform (on the Security Onion manager)
 
 ```bash
-git clone <your repository URL> techdetechtives && cd techdetechtives
+git clone https://github.com/techdetechtives/techdetechtives.git techdetechtives && cd techdetechtives
 sudo scripts/install.sh platform --dry-run        # show what would change
 sudo scripts/install.sh platform --jupyter-url https://ANALYTICS-HOST:8888
 sudo scripts/verify.sh platform
@@ -47,7 +47,7 @@ It prints two lines for the config file and the command to copy the CA certifica
 ### 3. Analytics workbench (on the analytics host)
 
 ```bash
-git clone <your repository URL> techdetechtives && cd techdetechtives
+git clone https://github.com/techdetechtives/techdetechtives.git techdetechtives && cd techdetechtives
 cp config/techdetechtives.env.example config/techdetechtives.env
 # paste TD_ES_HOST and TD_ES_API_KEY from step 2, and copy the CA certificate
 # to analytics/certs/so-ca.crt
