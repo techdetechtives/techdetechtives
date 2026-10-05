@@ -21,9 +21,9 @@
 #   scripts/install.sh vulnerability-down
 #        Stop the connector and Greenbone (scan data is kept).
 #   scripts/install.sh honeypot [--name NODE] [--ip ADDRESS] [--services LIST] [--port NAME=PORT]
-#        Run on the machine that should be the decoy (the ticketing machine, or
-#        better a small machine of its own). Starts OpenCanary and the shipper
-#        that turns every contact into a platform alert.
+#        Run on a machine of its own, used for nothing else. Never on the
+#        platform. Starts OpenCanary and the shipper that turns every contact
+#        with a decoy into a platform alert.
 #   scripts/install.sh honeypot-down
 #        Stop the honeypot.
 #   scripts/install.sh skills [--target DIR] [--only-techdetechtives]
@@ -92,6 +92,16 @@ low_memory_note() {
   fi
 }
 
+not_on_platform() {
+  # The add-on parts run on their own machines. The platform manages its own
+  # Docker and firewall, and a decoy or a scanner next to it would put it at risk.
+  local marker="${TD_SO_VERSION_FILE:-/etc/soversion}"
+  if [[ -f "$marker" ]]; then
+    die "this is the Security Onion machine. '$1' belongs on another machine: $2.
+Only 'scripts/install.sh platform' and the scripts in platform/ are run here."
+  fi
+}
+
 require_docker() {
   command -v docker >/dev/null 2>&1 || die "docker is not installed on this host"
   docker compose version >/dev/null 2>&1 || die "the docker compose plugin is not installed"
@@ -125,6 +135,7 @@ prepare_env() {
 }
 
 cmd_analytics() {
+  not_on_platform analytics "the analytics host"
   require_docker
   prepare_env
   local platform_address
@@ -159,6 +170,7 @@ forwarder_compose() {
 }
 
 cmd_ticketing() {
+  not_on_platform ticketing "the ticketing machine"
   require_docker
   "$ROOT/ticketing/setup-iris.sh" "$@"
   if [[ -z "$(env_value TD_ES_HOST)" || -z "$(env_value TD_ES_API_KEY)" ]]; then
@@ -193,6 +205,7 @@ vuln_compose() {
 }
 
 cmd_vulnerability() {
+  not_on_platform vulnerability "the ticketing machine"
   require_docker
   "$ROOT/vulnerability/setup-greenbone.sh" "$@"
   if [[ -z "$(env_value TD_ES_INGEST_API_KEY)" ]]; then
@@ -222,6 +235,7 @@ honeypot_compose() {
 }
 
 cmd_honeypot() {
+  not_on_platform honeypot "a small machine used for nothing else"
   require_docker
   "$ROOT/honeypot/setup-honeypot.sh" "$@"
   log "building and starting the honeypot (the first build downloads about 1 GB)"

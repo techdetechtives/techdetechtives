@@ -85,7 +85,7 @@ scripts/verify.sh vulnerability
 
 This installs Greenbone Community Edition (OpenVAS) on this host and starts the TechDetechtives vulnerability dashboard and reports pages. Findings can also be sent into the platform and opened as DFIR-IRIS tickets. See [vulnerability/README.md](vulnerability/README.md).
 
-### 6. Honeypot (on the ticketing machine, or better a small machine of its own)
+### 6. Honeypot (on a small machine of its own)
 
 ```bash
 # on the platform:
@@ -95,7 +95,7 @@ scripts/install.sh honeypot --name <a server-like name> --ip <this machine's IP>
 scripts/verify.sh honeypot
 ```
 
-This starts decoy services (a web sign-in page, FTP, Remote Desktop, databases and more) that nothing legitimate should ever touch. Each first contact becomes a platform alert and then a ticket. See [honeypot/README.md](honeypot/README.md) for choosing decoys, testing it, and keeping your vulnerability scanner from setting it off.
+The honeypot gets its own machine, used for nothing else; the installer refuses to run on the platform. This starts decoy services (a web sign-in page, FTP, Remote Desktop, databases and more) that nothing legitimate should ever touch. Each first contact becomes a platform alert and then a ticket. See [honeypot/README.md](honeypot/README.md) for choosing decoys, testing it, and keeping your vulnerability scanner from setting it off.
 
 ### 7. Analyst skills (where your AI assistant runs, optional)
 
