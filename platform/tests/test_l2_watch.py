@@ -180,6 +180,46 @@ class LayerTwoWatch(unittest.TestCase):
         quiet = "redef TechDetechtives::l2_learning_time = 0secs;\nredef TechDetechtives::l2_ignore_addresses += { 10.0.0.1/32 };"
         self.assertEqual(self.names(packets, settings=quiet), ["ARP_Reply_Burst"])
 
+    def test_a_flood_of_forged_addresses_does_not_blind_the_watch(self):
+        # 3,000 made-up machines announce themselves, far more than the lists are
+        # allowed to hold here. Afterwards a real poisoning must still be seen,
+        # and an ordinary new machine must not be taken for a flood.
+        generator = random.Random(11)
+        packets = ordinary_traffic(2)
+        for index in range(3000):
+            forged = ("10.%d.%d.%d" % (1 + index // 60000, index // 250 % 250, index % 250 + 1),
+                      "00:16:3e:%02x:%02x:%02x" % (generator.randrange(256), generator.randrange(256), generator.randrange(256)))
+            packets.append((130 + index * 0.01, announce(forged)))
+        quiet = 4000
+        newcomer = "00:1b:21:ee:00:01"
+        for index in range(150):
+            packets.append((quiet + index * 0.5, connection_attempt(newcomer, "10.0.0.210", "10.0.0.9", 2000 + index)))
+        packets.append((quiet + 100, announce(GATEWAY)))
+        for step in range(40):
+            packets.append((quiet + 120 + step * 2, arp(2, ATTACKER[1], GATEWAY[0], VICTIM[1], VICTIM[0])))
+            packets.append((quiet + 121 + step * 2, announce(GATEWAY)))
+        settings = "redef TechDetechtives::l2_learning_time = 0secs;\nredef TechDetechtives::l2_max_tracked = 50;"
+        found = self.notices(packets, settings=settings)
+        late = sorted(notice["note"].split("::")[1] for notice in found if notice["ts"] > 1_760_000_000 + quiet - 1)
+        self.assertEqual(late, ["ARP_Reply_Burst", "Address_Claimed_By_Two_Cards", "Address_Taken_Over"])
+        early = [notice["note"].split("::")[1] for notice in found if notice["ts"] <= 1_760_000_000 + quiet - 1]
+        self.assertLessEqual(early.count("Many_New_Cards"), 1)
+
+    def test_made_up_cards_are_forgotten_and_real_ones_are_kept(self):
+        # The same 150 made-up cards flood twice, 40 minutes apart. Seen once each
+        # time, they are forgotten in between, so the second flood is a flood again.
+        # The 20 real machines, seen every minute, are never counted as new.
+        generator = random.Random(3)
+        cards = ["%02x:%02x:%02x:%02x:%02x:%02x" % tuple([generator.randrange(256) & 0xFC] + [generator.randrange(256) for _ in range(5)])
+                 for _ in range(150)]
+
+        def flood(start):
+            return [(start + index * 0.05, connection_attempt(card, "10.9.0.%d" % (index + 1), "10.0.0.9", 3000 + index))
+                    for index, card in enumerate(cards)]
+        names = self.names(ordinary_traffic(60) + flood(300) + flood(300 + 2400))
+        self.assertEqual(names.count("Many_New_Cards"), 2)
+        self.assertEqual(set(names), {"Many_New_Cards"})
+
     def test_address_probes_are_not_claims(self):
         # A machine checking that an address is free asks from 0.0.0.0.
         packets = [(index, arp(1, "00:1b:21:dd:00:%02x" % index, "0.0.0.0", NOBODY, "10.0.0.50")) for index in range(5)]

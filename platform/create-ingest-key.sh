@@ -6,12 +6,14 @@
 # Run on the Security Onion manager as root.
 #
 # Usage:
-#   sudo ./create-ingest-key.sh [--for vulnerability|honeypot] [--expiration 365d] [--allow-ip ADDRESS]
+#   sudo ./create-ingest-key.sh [--for vulnerability|honeypot|network] [--expiration 365d] [--allow-ip ADDRESS]
 #
 #   --for vulnerability   (default) key for the vulnerability connector: it can
 #                         append to the logs-greenbone.results-* data stream
 #   --for honeypot        key for the honeypot shipper: it can append to the
 #                         logs-opencanary.* data streams
+#   --for network         key for the network inventory: it can append its
+#                         baseline alerts to the logs-netmap.* data streams
 #   --allow-ip            also let that machine reach the platform on port 9200
 #                         (needed when it is not already allowed)
 #
@@ -33,7 +35,7 @@ while [[ $# -gt 0 ]]; do
     --for)        shift; [[ $# -gt 0 ]] || die "--for needs a value"; PURPOSE="$1" ;;
     --expiration) shift; [[ $# -gt 0 ]] || die "--expiration needs a value"; EXPIRATION="$1" ;;
     --allow-ip)   shift; [[ $# -gt 0 ]] || die "--allow-ip needs a value"; ALLOW_IP="$1" ;;
-    -h|--help)    sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)    sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
   shift
@@ -54,7 +56,14 @@ case "$PURPOSE" in
     MACHINE="the honeypot machine"
     NEXT="scripts/install.sh honeypot"
     ;;
-  *) die "--for must be vulnerability or honeypot" ;;
+  network)
+    KEY_NAME="techdetechtives-network-ingest"
+    INDEX_PATTERN="logs-netmap.*"
+    SETTING="TD_NET_INGEST_API_KEY"
+    MACHINE="the ticketing machine"
+    NEXT="scripts/install.sh network"
+    ;;
+  *) die "--for must be vulnerability, honeypot or network" ;;
 esac
 
 [[ $EUID -eq 0 || "${TD_SKIP_ROOT_CHECK:-0}" == "1" ]] || die "run this as root on the Security Onion manager"

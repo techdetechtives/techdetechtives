@@ -65,6 +65,33 @@ class ZeekLoadSetting(unittest.TestCase):
         self.assertEqual(len(saved), 1)
         self.assertNotIn(ENTRY, saved[0].read_text())
 
+    def test_off_after_an_upgrade_changed_the_default_list(self):
+        state = str(Path(self.folder.name) / "state")
+        self.run_tool("on", "--state", state)
+        upgraded = {"zeek": {"config": {"local": {"load": DEFAULTS["zeek"]["config"]["local"]["load"] + ["new-in-upgrade"]}}}}
+        self.defaults.write_text(yaml.safe_dump(upgraded))
+        self.run_tool("off", "--state", state)
+        self.assertIsNone(self.load_list())                    # the platform's new list applies again
+        self.assertFalse(Path(state).exists())
+
+    def test_on_again_after_an_upgrade_carries_the_new_default(self):
+        state = str(Path(self.folder.name) / "state")
+        self.run_tool("on", "--state", state)
+        upgraded = DEFAULTS["zeek"]["config"]["local"]["load"] + ["new-in-upgrade"]
+        self.defaults.write_text(yaml.safe_dump({"zeek": {"config": {"local": {"load": upgraded}}}}))
+        self.run_tool("on", "--state", state)
+        self.assertEqual(self.load_list(), upgraded + [ENTRY])
+
+    def test_a_list_edited_while_the_watch_is_on_is_never_dropped(self):
+        state = str(Path(self.folder.name) / "state")
+        self.run_tool("on", "--state", state)
+        edited = self.load_list() + ["custom/site-policy"]
+        self.local.write_text(yaml.safe_dump({"zeek": {"config": {"local": {"load": edited}}}}))
+        self.run_tool("on", "--state", state)
+        self.assertEqual(self.load_list(), edited)
+        self.run_tool("off", "--state", state)
+        self.assertEqual(self.load_list(), [item for item in edited if item != ENTRY])
+
     def test_unknown_platform_layout_is_refused(self):
         self.defaults.write_text("zeek:\n  config: {}\n")
         result = self.run_tool("on")

@@ -21,7 +21,7 @@ installer on the wrong machine is the most common mistake.
 | --- | --- | --- |
 | Platform (the Security Onion manager) | Collection, storage (Elasticsearch on port 9200), the analyst console, Suricata, Zeek, Strelka, the detection engines | Security Onion's own installer, then `sudo scripts/install.sh platform` |
 | Honeypot machine (optional; a small machine used for nothing else) | OpenCanary decoy services and the shipper that turns each contact into a platform alert | `scripts/install.sh honeypot` |
-| Second host (any Linux host with Docker and the Compose plugin) | Hunting workbench (Jupyter + Spark, `127.0.0.1:8888`), DFIR-IRIS ticketing (port 8443) with the alert forwarder, Greenbone scanning (port 9443) with the vulnerability dashboard (port 8444) | `scripts/install.sh analytics`, `ticketing`, `vulnerability` |
+| Second host (any Linux host with Docker and the Compose plugin) | Hunting workbench (Jupyter + Spark, `127.0.0.1:8888`), DFIR-IRIS ticketing (port 8443) with the alert forwarder, Greenbone scanning (port 9443) with the vulnerability dashboard (port 8444), network inventory and traffic map (port 8445) | `scripts/install.sh analytics`, `ticketing`, `vulnerability`, `network` |
 
 The repository holds only the additions. Security Onion, DFIR-IRIS and
 Greenbone are fetched from their own projects at the versions pinned in

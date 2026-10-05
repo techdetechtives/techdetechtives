@@ -1,0 +1,58 @@
+# TechDetechtives network inventory and traffic map.
+# Copyright (c) 2026 TechDetechtives. MIT licence (see LICENSE).
+#
+# Reads connection and industrial-protocol records from the platform with the
+# read-only key, keeps a device inventory and a baseline of who talks to whom,
+# serves the pages, and (when its own key is set) sends what is new since the
+# baseline to the platform as alerts. It never sends anything to the monitored
+# network.
+#
+# Start with:  scripts/install.sh network
+
+name: techdetechtives-network
+
+services:
+  td-netmap:
+    build:
+      context: ..
+      dockerfile: network/app/Dockerfile
+    image: techdetechtives/netmap:0.1.0
+    container_name: td-netmap
+    env_file:
+      - ../config/techdetechtives.env
+    environment:
+      TD_NET_TLS_CERT: /tls/td-net-cert.pem
+      TD_NET_TLS_KEY: /tls/td-net-key.pem
+    # Host networking: the pages listen on this host's TD_NET_PORT and the
+    # platform is found by the name this host knows it by.
+    network_mode: host
+    # Not root: the account that first installed it (kept in the settings file
+    # as TD_NET_UID), which owns the TLS key and the files in the state volume.
+    user: "${TD_NET_UID:-1000}:${TD_NET_GID:-1000}"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - td-netmap-state:/state
+      - ./certs:/tls:ro
+      - ../branding:/brand:ro
+      - ../analytics/certs:/certs:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, socket; socket.create_connection(('127.0.0.1', int(os.environ.get('TD_NET_PORT') or 8445)), 5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-file: "5"
+        max-size: "5m"
+
+volumes:
+  td-netmap-state:

@@ -9,6 +9,7 @@
 #   scripts/verify.sh ticketing   On the analytics host: are DFIR-IRIS and the forwarder working?
 #   scripts/verify.sh vulnerability   On the ticketing machine: are Greenbone and its connector working?
 #   scripts/verify.sh honeypot    On the honeypot machine: are the decoys and the shipper working?
+#   scripts/verify.sh network     On the ticketing machine: is the network inventory reading from the platform?
 
 set -euo pipefail
 
@@ -19,7 +20,7 @@ FAILED=0
 
 pass() { printf '[ ok ] %s\n' "$*"; }
 fail() { printf '[FAIL] %s\n' "$*"; FAILED=1; }
-usage() { sed -n '5,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '5,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 cmd_repo() {
   local f
@@ -55,7 +56,8 @@ except ImportError:
 if yaml:
     files = list((root / "platform/detections/sigma").glob("*.yml")) + [
         root / "analytics/docker-compose.yml", root / "ticketing/docker-compose.yml",
-        root / "vulnerability/docker-compose.yml", root / "honeypot/docker-compose.yml"]
+        root / "vulnerability/docker-compose.yml", root / "honeypot/docker-compose.yml",
+        root / "network/docker-compose.yml"]
     ids = set()
     for path in files:
         try:
@@ -96,6 +98,14 @@ if yaml:
                 problems.append(f"{path.name}: no entry in platform/detections/validation.yml")
     except (OSError, KeyError, TypeError, yaml.YAMLError) as error:
         problems.append(f"validation.yml: {type(error).__name__}: {error}")
+    # Images built from the repository root only receive what .dockerignore lets through.
+    allowed = [line[1:] for line in (root / ".dockerignore").read_text().split() if line.startswith("!")]
+    for dockerfile in sorted(root.glob("*/*/Dockerfile")):
+        for line in dockerfile.read_text().splitlines():
+            parts = line.split()
+            if len(parts) == 3 and parts[0] == "COPY" and "/" in parts[1] and (root / parts[1]).exists():
+                if parts[1] not in allowed:
+                    problems.append(f"{dockerfile.relative_to(root)}: copies {parts[1]}, which .dockerignore keeps out of the build")
     # Skills: readable front matter, name matching the folder, usable description.
     for path in sorted((root / "skills").glob("*/*/SKILL.md")):
         label = f"skills/{path.parent.parent.name}/{path.parent.name}"
@@ -161,6 +171,11 @@ PY
       pass "honeypot tests"
     else
       fail "honeypot tests (run: python3 -m unittest discover -s honeypot/tests -v)"
+    fi
+    if python3 -m unittest discover -s "$ROOT/network/tests" >/dev/null 2>&1; then
+      pass "network inventory tests"
+    else
+      fail "network inventory tests (run: python3 -m unittest discover -s network/tests -v)"
     fi
     if python3 -m unittest discover -s "$ROOT/vulnerability/tests" >/dev/null 2>&1; then
       pass "vulnerability connector tests"
@@ -247,6 +262,28 @@ cmd_vulnerability() {
   fi
 }
 
+cmd_network() {
+  command -v docker >/dev/null 2>&1 || { fail "docker is not installed"; return; }
+  [[ -f "$ENV_FILE" ]] || { fail "$ENV_FILE not found; run scripts/install.sh network first"; return; }
+  local compose=(docker compose -f "$ROOT/network/docker-compose.yml" --env-file "$ENV_FILE")
+  if [[ -n "$("${compose[@]}" ps --status running -q td-netmap 2>/dev/null)" ]]; then
+    pass "td-netmap container is running"
+  else
+    fail "td-netmap container is not running (docker logs td-netmap)"
+    return
+  fi
+  if docker exec td-netmap python -m td_net.main --check; then
+    pass "network inventory can read the platform, and the platform has connection records"
+  else
+    fail "network inventory connection check"
+  fi
+  if docker exec td-netmap python -m td_net.main --status; then
+    pass "the platform's records have been read"
+  else
+    fail "no finished read of the platform yet (docker logs td-netmap); the first one takes a minute or two"
+  fi
+}
+
 cmd_honeypot() {
   command -v docker >/dev/null 2>&1 || { fail "docker is not installed"; return; }
   [[ -f "$ENV_FILE" && -f "$ROOT/honeypot/ports.yaml" ]] || { fail "the honeypot is not set up; run scripts/install.sh honeypot first"; return; }
@@ -289,6 +326,7 @@ case "${1:-}" in
   ticketing) cmd_ticketing ;;
   vulnerability) cmd_vulnerability ;;
   honeypot)  cmd_honeypot ;;
+  network)   cmd_network ;;
   -h|--help) usage; exit 0 ;;
   *)         usage >&2; exit 2 ;;
 esac
