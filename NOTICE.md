@@ -1,6 +1,6 @@
 # Notices
 
-TechDetechtives combines original work with five upstream projects, and refers to a sixth. Each part keeps its own licence. This file is not legal advice.
+TechDetechtives combines original work with six upstream projects, and refers to a seventh. Each part keeps its own licence. This file is not legal advice.
 
 ## 1. Security Onion (platform base)
 
@@ -68,12 +68,23 @@ The project is an independent community effort. It is not affiliated with Anthro
 
 Atomic Red Team (https://github.com/redcanaryco/atomic-red-team, Copyright Red Canary, MIT licence) is referred to by `platform/detections/validation.yml`, which names tests by their public identifiers. None of it is included in this repository.
 
-## 6. Original TechDetechtives work
+## 6. OpenCanary (honeypot)
 
-Everything outside `analytics/` and `skills/community/` (the platform overlay, rules, ticket forwarder, vulnerability connector and dashboard, the skills under `skills/techdetechtives/`, scripts and documentation) is original work, Copyright (c) 2026 TechDetechtives, under the MIT licence in `LICENSE`.
+- Project: OpenCanary, https://github.com/thinkst/opencanary
+- Copyright (c) 2018, Thinkst Applied Research. All rights reserved.
+- Licence: BSD 3-Clause, full text in `licenses/BSD-3-Clause-OpenCanary.txt`
+- Version installed: see `upstream.lock`
+
+OpenCanary is used unmodified. `honeypot/opencanary/Dockerfile` installs it from its own repository, at the pinned commit, into a container image built on your machine; none of its code is included in this repository. `honeypot/make_config.py` writes a settings file for it, and the TechDetechtives shipper is a separate program that only reads the log file OpenCanary writes.
+
+TechDetechtives is not affiliated with or endorsed by Thinkst Applied Research. Their name is not used to promote this project.
+
+## 7. Original TechDetechtives work
+
+Everything outside `analytics/` and `skills/community/` (the platform overlay, rules, ticket forwarder, vulnerability connector and dashboard, honeypot shipper and setup, the skills under `skills/techdetechtives/`, scripts and documentation) is original work, Copyright (c) 2026 TechDetechtives, under the MIT licence in `LICENSE`.
 
 The TechDetechtives emblem in `branding/` was supplied by the project owner. It contains no other organisation's logo.
 
 ## How the parts are kept separate
 
-The platform, the analytics workbench, the ticket forwarder, DFIR-IRIS, Greenbone and the vulnerability connector are separate programs. The workbench and the forwarder read from the platform only over its Elasticsearch HTTP API, with a read-only key, and the forwarder writes to DFIR-IRIS only over its HTTP API. No GPL-licensed code is combined with Elastic-licensed code, and no Elastic-licensed code is copied into this repository.
+The platform, the analytics workbench, the ticket forwarder, DFIR-IRIS, Greenbone, the vulnerability connector, OpenCanary and the honeypot shipper are separate programs. The workbench and the forwarder read from the platform only over its Elasticsearch HTTP API, with a read-only key, and the forwarder writes to DFIR-IRIS only over its HTTP API. No GPL-licensed code is combined with Elastic-licensed code, and no Elastic-licensed code is copied into this repository.

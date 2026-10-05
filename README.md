@@ -14,10 +14,11 @@ TechDetechtives is a **modified deployment built on Security Onion**, combined w
 | Analytics workbench | `analytics/` | Jupyter and Spark container, hunting notebooks, `td_hunt` helper library | HELK (modified) | GPL-3.0 |
 | Ticketing | `ticketing/` | Opens a DFIR-IRIS ticket for every platform alert; installs DFIR-IRIS on your own host | DFIR-IRIS 2.4.29 (fetched at install, not copied here) | Forwarder: MIT. DFIR-IRIS itself: LGPL-3.0 |
 | Vulnerability scanning | `vulnerability/` | Installs Greenbone (OpenVAS) on your own host; vulnerability dashboard, reports pages, findings into the platform, tickets for findings | Greenbone Community Edition (fetched at install, not copied here) | Connector: MIT. Greenbone itself: AGPL-3.0 and GPL-2.0 |
+| Honeypot | `honeypot/` | A decoy machine: every contact with its fake services becomes a platform alert and a ticket | OpenCanary 0.9.10 (installed into a container at install, not copied here) | Shipper: MIT. OpenCanary itself: BSD 3-Clause |
 | Analyst skills | `skills/` | Guidance files for an AI assistant: 4 written for this platform, 26 selected from a community library | Community cybersecurity skills library (selected documents copied, unchanged) | TechDetechtives skills: MIT. Community skills: Apache-2.0 |
 | Scripts and docs | `scripts/`, `docs/` | Install, verify, fetch upstream | Original | MIT |
 
-Security Onion's code and image are **not** in this repository, and neither are DFIR-IRIS or Greenbone; the only upstream material copied here is the selection of skill documents in `skills/community/`. You install Security Onion from its official ISO or installer, and this repository customizes that installation through the customization points Security Onion provides. That keeps upgrades working and keeps the two licences separate. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains the design.
+Security Onion's code and image are **not** in this repository, and neither are DFIR-IRIS, Greenbone or OpenCanary; the only upstream material copied here is the selection of skill documents in `skills/community/`. You install Security Onion from its official ISO or installer, and this repository customizes that installation through the customization points Security Onion provides. That keeps upgrades working and keeps the two licences separate. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains the design.
 
 ## Requirements
 
@@ -84,7 +85,19 @@ scripts/verify.sh vulnerability
 
 This installs Greenbone Community Edition (OpenVAS) on this host and starts the TechDetechtives vulnerability dashboard and reports pages. Findings can also be sent into the platform and opened as DFIR-IRIS tickets. See [vulnerability/README.md](vulnerability/README.md).
 
-### 6. Analyst skills (where your AI assistant runs, optional)
+### 6. Honeypot (on the ticketing machine, or better a small machine of its own)
+
+```bash
+# on the platform:
+sudo platform/create-ingest-key.sh --for honeypot --allow-ip <honeypot machine IP>
+# on the honeypot machine, after putting the printed line in config/techdetechtives.env:
+scripts/install.sh honeypot --name <a server-like name> --ip <this machine's IP>
+scripts/verify.sh honeypot
+```
+
+This starts decoy services (a web sign-in page, FTP, Remote Desktop, databases and more) that nothing legitimate should ever touch. Each first contact becomes a platform alert and then a ticket. See [honeypot/README.md](honeypot/README.md) for choosing decoys, testing it, and keeping your vulnerability scanner from setting it off.
+
+### 7. Analyst skills (where your AI assistant runs, optional)
 
 ```bash
 scripts/install.sh skills
@@ -120,7 +133,7 @@ Upgrade the platform with its own upgrade tool (`soup`). The overlay lives in th
 
 ## Status
 
-Version 0.5.0. What has and has not been exercised is listed in [MODIFICATIONS.md](MODIFICATIONS.md#test-status). In short: the overlay, installers, forwarder, connector and notebook logic have automated tests against stand-ins; on a live Security Onion 2.4.211 the console pages, both access keys, DFIR-IRIS and the forwarder's connections were confirmed. Not yet seen on a live system: a rule firing, an alert becoming a ticket, the workbench image and Spark, Greenbone and its connector, and the rule-enable setting.
+Version 0.6.0. What has and has not been exercised is listed in [MODIFICATIONS.md](MODIFICATIONS.md#test-status). In short: the overlay, installers, forwarder, connector and notebook logic have automated tests against stand-ins; on a live Security Onion 2.4.211 the console pages, both access keys, DFIR-IRIS and the forwarder's connections were confirmed. Not yet seen on a live system: a rule firing, an alert becoming a ticket, the workbench image and Spark, Greenbone and its connector, the honeypot, and the rule-enable setting.
 
 ## Licence
 

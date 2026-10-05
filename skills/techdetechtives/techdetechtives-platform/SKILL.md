@@ -14,12 +14,13 @@ stack are wrong on this one.
 
 ## What runs where
 
-There are two machines. Commands only work on the right one, and running an
+There are two machines, and optionally a third for the honeypot. Commands only work on the right one, and running an
 installer on the wrong machine is the most common mistake.
 
 | Machine | Runs | Installed with |
 | --- | --- | --- |
 | Platform (the Security Onion manager) | Collection, storage (Elasticsearch on port 9200), the analyst console, Suricata, Zeek, Strelka, the detection engines | Security Onion's own installer, then `sudo scripts/install.sh platform` |
+| Honeypot machine (optional; the second host or a small machine of its own) | OpenCanary decoy services and the shipper that turns each contact into a platform alert | `scripts/install.sh honeypot` |
 | Second host (any Linux host with Docker and the Compose plugin) | Hunting workbench (Jupyter + Spark, `127.0.0.1:8888`), DFIR-IRIS ticketing (port 8443) with the alert forwarder, Greenbone scanning (port 9443) with the vulnerability dashboard (port 8444) | `scripts/install.sh analytics`, `ticketing`, `vulnerability` |
 
 The repository holds only the additions. Security Onion, DFIR-IRIS and
@@ -37,14 +38,15 @@ sudo scripts/verify.sh platform                # is everything installed and swi
 sudo platform/apply-overlay.sh rules           # the rules as the console sees them
 sudo platform/apply-overlay.sh revert          # undo the overlay
 sudo platform/create-readonly-key.sh --allow-ip <second host>    # key for workbench and forwarder
-sudo platform/create-ingest-key.sh --allow-ip <second host>      # key for vulnerability findings
+sudo platform/create-ingest-key.sh                              # key for vulnerability findings
+sudo platform/create-ingest-key.sh --for honeypot --allow-ip <honeypot machine>
 ```
 
 On the second host:
 
 ```bash
-scripts/install.sh analytics | ticketing | vulnerability
-scripts/verify.sh  analytics | ticketing | vulnerability
+scripts/install.sh analytics | ticketing | vulnerability | honeypot
+scripts/verify.sh  analytics | ticketing | vulnerability | honeypot
 ```
 
 `scripts/verify.sh repo` runs the repository's own tests anywhere.
@@ -67,6 +69,14 @@ the file, and never paste its contents into a ticket, a notebook or a chat.
   medium and above.
 - The workbench reads events with the same read-only key. It cannot write to
   the platform.
+- The honeypot shipper (`td-honeypot-shipper`) writes each contact with a
+  decoy service to `logs-opencanary.alerts-techdetechtives`. A first contact
+  is tagged `alert` (rule names start with `Honeypot:`, `event.module` is
+  `opencanary`) and is ticketed like any alert; repeats are plain events.
+  Nothing legitimate talks to the honeypot, so treat a honeypot alert from an
+  internal address as worth investigating, and check first whether the source
+  is a known scanner. Passwords tried against it are withheld by default; do
+  not go looking for them.
 
 When an alert did not become a ticket, check in this order: is the rule
 enabled (`apply-overlay.sh rules`), did an alert appear in the console's

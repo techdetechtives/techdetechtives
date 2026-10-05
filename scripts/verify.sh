@@ -8,6 +8,7 @@
 #   scripts/verify.sh analytics   On the analytics host: is the workbench healthy?
 #   scripts/verify.sh ticketing   On the analytics host: are DFIR-IRIS and the forwarder working?
 #   scripts/verify.sh vulnerability   On the ticketing machine: are Greenbone and its connector working?
+#   scripts/verify.sh honeypot    On the honeypot machine: are the decoys and the shipper working?
 
 set -euo pipefail
 
@@ -18,11 +19,11 @@ FAILED=0
 
 pass() { printf '[ ok ] %s\n' "$*"; }
 fail() { printf '[FAIL] %s\n' "$*"; FAILED=1; }
-usage() { sed -n '5,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '5,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 cmd_repo() {
   local f
-  for f in LICENSE NOTICE.md MODIFICATIONS.md licenses/Elastic-License-2.0.txt licenses/GPL-3.0.txt licenses/Apache-2.0.txt analytics/LICENSE upstream.lock skills/MANIFEST.sha256; do
+  for f in LICENSE NOTICE.md MODIFICATIONS.md licenses/Elastic-License-2.0.txt licenses/GPL-3.0.txt licenses/Apache-2.0.txt licenses/BSD-3-Clause-OpenCanary.txt analytics/LICENSE upstream.lock skills/MANIFEST.sha256; do
     if [[ -s "$ROOT/$f" ]]; then pass "present: $f"; else fail "missing: $f"; fi
   done
   while IFS= read -r f; do
@@ -52,7 +53,9 @@ try:
 except ImportError:
     yaml = None
 if yaml:
-    files = list((root / "platform/detections/sigma").glob("*.yml")) + [root / "analytics/docker-compose.yml"]
+    files = list((root / "platform/detections/sigma").glob("*.yml")) + [
+        root / "analytics/docker-compose.yml", root / "ticketing/docker-compose.yml",
+        root / "vulnerability/docker-compose.yml", root / "honeypot/docker-compose.yml"]
     ids = set()
     for path in files:
         try:
@@ -151,6 +154,11 @@ PY
     else
       fail "forwarder tests (run: python3 -m unittest discover -s ticketing/tests -v)"
     fi
+    if python3 -m unittest discover -s "$ROOT/honeypot/tests" >/dev/null 2>&1; then
+      pass "honeypot tests"
+    else
+      fail "honeypot tests (run: python3 -m unittest discover -s honeypot/tests -v)"
+    fi
     if python3 -m unittest discover -s "$ROOT/vulnerability/tests" >/dev/null 2>&1; then
       pass "vulnerability connector tests"
     else
@@ -236,12 +244,48 @@ cmd_vulnerability() {
   fi
 }
 
+cmd_honeypot() {
+  command -v docker >/dev/null 2>&1 || { fail "docker is not installed"; return; }
+  [[ -f "$ENV_FILE" && -f "$ROOT/honeypot/ports.yaml" ]] || { fail "the honeypot is not set up; run scripts/install.sh honeypot first"; return; }
+  local compose=(docker compose -f "$ROOT/honeypot/docker-compose.yml" -f "$ROOT/honeypot/ports.yaml" --env-file "$ENV_FILE")
+  if [[ -n "$("${compose[@]}" ps --status running -q td-honeypot 2>/dev/null)" ]]; then
+    pass "td-honeypot container is running"
+  else
+    fail "td-honeypot container is not running (docker logs td-honeypot)"
+    return
+  fi
+  # Each decoy should answer on its port. Opening and closing a connection is
+  # not a sign-in attempt and raises no alert, except on the SSH decoy, which
+  # reports every connection: that one is left alone.
+  local pair port address open=0 closed=""
+  address="$(grep -E "^TD_HONEYPOT_BIND=" "$ENV_FILE" | tail -n 1 | cut -d= -f2-)"
+  [[ -n "$address" && "$address" != "0.0.0.0" ]] || address="127.0.0.1"
+  for pair in $(grep -E "^TD_HONEYPOT_PORT_MAP=" "$ENV_FILE" | tail -n 1 | cut -d= -f2- | tr ',' ' '); do
+    [[ "${pair%%=*}" == "22" ]] && continue
+    port="${pair##*=}"
+    if (exec 3<>"/dev/tcp/$address/$port") 2>/dev/null; then open=$((open + 1)); else closed="$closed $port"; fi
+  done
+  if [[ -z "$closed" ]]; then pass "$open decoy ports answer on $address"; else fail "decoy ports not answering on $address:$closed"; fi
+  if [[ -n "$("${compose[@]}" ps --status running -q td-honeypot-shipper 2>/dev/null)" ]]; then
+    pass "td-honeypot-shipper container is running"
+  else
+    fail "td-honeypot-shipper container is not running (docker logs td-honeypot-shipper; it needs TD_ES_HOST and TD_HONEYPOT_API_KEY)"
+    return
+  fi
+  if "${compose[@]}" exec -T td-honeypot-shipper python /opt/techdetechtives/td_honeypot.py --check; then
+    pass "shipper can read the honeypot log and reach the platform"
+  else
+    fail "shipper check"
+  fi
+}
+
 case "${1:-}" in
   repo)      cmd_repo ;;
   platform)  cmd_platform ;;
   analytics) cmd_analytics ;;
   ticketing) cmd_ticketing ;;
   vulnerability) cmd_vulnerability ;;
+  honeypot)  cmd_honeypot ;;
   -h|--help) usage; exit 0 ;;
   *)         usage >&2; exit 2 ;;
 esac

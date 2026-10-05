@@ -1,0 +1,87 @@
+# TechDetechtives honeypot.
+# Copyright (c) 2026 TechDetechtives. MIT licence (see LICENSE).
+#
+# Two containers: OpenCanary, which pretends to offer network services and
+# writes down every contact, and the shipper, which sends those contacts to the
+# platform. The decoy ports are listed in ports.yaml, which
+# honeypot/setup-honeypot.sh writes next to this file.
+#
+# Start with:  scripts/install.sh honeypot
+
+name: techdetechtives-honeypot
+
+services:
+  td-honeypot:
+    build:
+      context: ./opencanary
+      args:
+        OPENCANARY_COMMIT: ${TD_OPENCANARY_COMMIT:?run scripts/install.sh honeypot}
+    image: techdetechtives/opencanary:${TD_OPENCANARY_VERSION:-pinned}
+    container_name: td-honeypot
+    # Its own network, so the decoy cannot reach this host's local-only
+    # services or other containers. Only the ports in ports.yaml lead in.
+    networks:
+      - decoy
+    # Root inside the container holds only what it needs to open low ports and
+    # then switch to the unprivileged account; it cannot gain more.
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 512m
+    tmpfs:
+      - /run
+    volumes:
+      - ./opencanary.conf:/etc/opencanaryd/opencanary.conf:ro
+      - honeypot-log:/var/log/opencanary
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-file: "3"
+        max-size: "5m"
+
+  td-honeypot-shipper:
+    build:
+      context: ..
+      dockerfile: honeypot/shipper/Dockerfile
+    image: techdetechtives/honeypot-shipper:0.1.0
+    container_name: td-honeypot-shipper
+    env_file:
+      - ../config/techdetechtives.env
+    # Host networking so the shipper finds the platform the same way this host does.
+    network_mode: host
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - honeypot-log:/honeypot-log:ro
+      - honeypot-state:/state
+      - ../analytics/certs:/certs:ro
+    depends_on:
+      - td-honeypot
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-file: "5"
+        max-size: "5m"
+
+networks:
+  decoy:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
+
+volumes:
+  honeypot-log:
+  honeypot-state:

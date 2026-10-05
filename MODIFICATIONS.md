@@ -67,13 +67,19 @@ Added in version 0.3.0, 2026-10-04. Original work; nothing here modifies Securit
 | Platform | One API key named `techdetechtives-vulnerability-ingest` is created by `platform/create-ingest-key.sh`. It can only append to the `logs-greenbone.results-*` data stream, which the connector fills with scan findings. The overview page gains links to the ticketing and vulnerability pages. |
 | DFIR-IRIS | No change. The connector opens tickets through its API. |
 
+## Honeypot
+
+Added in 0.6.0. OpenCanary 0.9.10 is installed unmodified into a container image at the commit in `upstream.lock`. TechDetechtives supplies its settings file (which decoys are on, their banners, where it logs) and runs it on its own Docker network with a reduced privilege list. The shipper is original work.
+
+On the platform, `platform/create-ingest-key.sh --for honeypot` creates one more API key, `techdetechtives-honeypot-ingest`, which can only append to `logs-opencanary.*`, and with `--allow-ip` adds the honeypot machine to the `elasticsearch_rest` firewall group. Honeypot events are written to the data stream `logs-opencanary.alerts-techdetechtives`; first contacts are tagged `alert`, so they appear on the Alerts page and are ticketed.
+
 ## Analyst skills
 
 Added in 0.5.0. `skills/community/` holds documents copied **unchanged** from the community cybersecurity skills library (Apache-2.0; commit in `upstream.lock`): `SKILL.md`, `LICENSE`, `references/` and `assets/` for the 26 skills in `skills/selection.txt`. The upstream `scripts/` folders and translations were left out. Checksums are in `skills/MANIFEST.sha256`. The four skills under `skills/techdetechtives/` are original.
 
 ## Test status
 
-As of 0.5.0.
+As of 0.6.0.
 
 Confirmed on a live system (Security Onion 2.4.211 standalone, with a second VM; 2026-10-04 and 2026-10-05):
 
@@ -92,6 +98,8 @@ Tested with automated checks or stand-ins:
 - `platform/detections/validation.yml`: every test id and name was checked against the Atomic Red Team definitions at the pinned commit.
 - `td_hunt` sample-data loading, flattening, Spark preparation and process-tree functions.
 - Every notebook code cell, executed on the sample data with pandas. For the Spark SQL cells, an SQLite stand-in ran the same SQL text.
+- Honeypot: 41 automated tests against a stand-in for the platform and log files in OpenCanary's format, covering alert contents, one alert per address and decoy with repeats stored as plain events, escalation, restarts, ignored addresses, withheld passwords, cleaning of visitor-supplied text, outages, partly delivered batches, a wrong key, an event the platform cannot store, log rotation, late delivery, and the generated settings. The generated settings file passes OpenCanary's own settings check. The installer was run with stand-ins for Docker, and `docker compose config` accepts the files. A honeypot alert was passed through the forwarder's ticket builder.
+- `platform/create-ingest-key.sh --for honeypot` with stand-ins for the platform's tools.
 - Forwarder: 17 automated tests against local stand-ins for the platform and DFIR-IRIS, covering severity filtering, one ticket per alert, no duplicates across cycles and restarts, late-arriving alerts, outages, rejected alerts, the per-cycle cap, thousands of alerts sharing one timestamp, ticket contents and credentials.
 - Vulnerability connector: 33 automated tests against local stand-ins for Greenbone, the platform and DFIR-IRIS, covering report sync, the "currently open" view, platform delivery without duplicates, ticket rules, outages, sign-in, markup and spreadsheet-formula injection from scan text, CSV export, and branding.
 - Dashboard and reports pages: rendered with synthetic scan data and checked by eye in light and dark mode and at a narrow width. The severity colours pass an automated check for colour-blind readers.
@@ -105,6 +113,7 @@ Not yet tested:
 - An alert becoming a DFIR-IRIS ticket end to end (the forwarder is connected, but no alert at medium or above had occurred when it was checked).
 - Building the workbench container image, and running Spark and JupyterLab in it. Package versions in `analytics/requirements.txt` are ranges that have not been resolved in a build. `td_hunt` has not read from a live Elasticsearch.
 - Greenbone has not been started from this setup. The connector has not read from a real Greenbone: its protocol handling was written from the published protocol and tested against a stand-in, so field names in real responses may need adjusting. Its container image has not been built, and findings have not been written to a real platform data stream.
+- The honeypot has not been started. The OpenCanary image has not been built, and OpenCanary has not been run under the reduced privilege list in `honeypot/docker-compose.yml`. Whether alerts show the visitor's real address depends on Docker's networking on the machine. The platform has not yet been asked to create the honeypot data stream or to show its alerts.
 - The skills have not been tried with an assistant on a live deployment. The community skills are included as their authors wrote them; see `skills/README.md` for their limits.
 
 `scripts/verify.sh analytics` runs a self-test inside the container that covers Spark and the platform connection.
