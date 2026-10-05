@@ -1,0 +1,42 @@
+title: TechDetechtives - Backups or Recovery Options Destroyed
+id: debe0862-164f-5249-a2a7-a9a5be91c773
+status: experimental
+description: >
+  Detects deletion of volume shadow copies or the backup catalogue, and
+  switching off Windows recovery. Ransomware does this just before encrypting
+  so that files cannot be restored.
+author: TechDetechtives
+date: 2026-10-05
+tags:
+  - attack.impact
+  - attack.t1490
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_vssadmin:
+    Image|endswith: '\vssadmin.exe'
+    CommandLine|contains|all:
+      - 'delete'
+      - 'shadows'
+  selection_wmic:
+    CommandLine|contains|all:
+      - 'shadowcopy'
+      - 'delete'
+  selection_wbadmin:
+    Image|endswith: '\wbadmin.exe'
+    CommandLine|contains|all:
+      - 'delete'
+    CommandLine|contains:
+      - 'catalog'
+      - 'systemstatebackup'
+      - 'backup'
+  selection_bcdedit:
+    Image|endswith: '\bcdedit.exe'
+    CommandLine|contains:
+      - 'recoveryenabled no'
+      - 'ignoreallfailures'
+  condition: 1 of selection_*
+falsepositives:
+  - Disk clean-up scripts that remove old shadow copies on purpose
+level: high

@@ -1,0 +1,42 @@
+title: TechDetechtives - certutil Used to Download or Decode a File
+id: d5b87621-d1eb-54bd-8cbd-331b99dd5605
+status: experimental
+description: >
+  Detects certutil.exe fetching a file from a URL or decoding an encoded file.
+  It is a certificate tool, but it is widely used to bring in and unpack
+  payloads because it is present on every Windows machine. A renamed copy is
+  recognised by the name stored inside the program file.
+author: TechDetechtives
+date: 2026-10-05
+tags:
+  - attack.command_and_control
+  - attack.t1105
+  - attack.defense_evasion
+  - attack.t1140
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_tool_image:
+    Image|endswith: '\certutil.exe'
+  selection_tool_renamed:
+    OriginalFileName: 'CertUtil.exe'
+  selection_download:
+    CommandLine|contains:
+      - 'urlcache'
+      - 'verifyctl'
+  selection_download_target:
+    CommandLine|contains:
+      - 'http://'
+      - 'https://'
+      - 'ftp://'
+  selection_decode:
+    CommandLine|contains:
+      - ' -decode '
+      - ' /decode '
+      - ' -decodehex '
+      - ' /decodehex '
+  condition: (selection_tool_image or selection_tool_renamed) and ((selection_download and selection_download_target) or selection_decode)
+falsepositives:
+  - Administrators decoding certificates by hand
+level: medium

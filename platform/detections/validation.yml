@@ -127,6 +127,334 @@ checks:
         note: >
           The same idea with both curl and wget. Needs internet access.
 
+  - rule: sigma/techdetechtives_lsass_dump_comsvcs.yml
+    title: TechDetechtives - LSASS Memory Dump Through comsvcs.dll
+    technique: T1003.001
+    platform: windows
+    needs: process start events with command lines (Elastic Defend or Sysmon)
+    tests:
+      - kind: atomic
+        technique: T1003.001
+        guid: 2536dee2-12fb-459a-8c37-971844fa73be
+        name: Dump LSASS.exe Memory using comsvcs.dll
+        run: 'Invoke-AtomicTest T1003.001 -TestGuids 2536dee2-12fb-459a-8c37-971844fa73be'
+        expect: alert
+        confirmed: "no"
+        note: >
+          Needs an administrator prompt. Endpoint protection usually blocks the
+          dump itself; the alert is raised from the command line either way. Run
+          the clean-up to remove the dump file, which would contain real
+          credentials.
+
+  - rule: sigma/techdetechtives_registry_hive_save_credentials.yml
+    title: TechDetechtives - Credential Registry Hives Saved to a File
+    technique: T1003.002
+    platform: windows
+    needs: process start events with command lines (Elastic Defend or Sysmon)
+    tests:
+      - kind: atomic
+        technique: T1003.002
+        guid: 5c2571d0-1572-416d-9676-812e64ca9f44
+        name: Registry dump of SAM, creds, and secrets
+        run: 'Invoke-AtomicTest T1003.002 -TestGuids 5c2571d0-1572-416d-9676-812e64ca9f44'
+        expect: alert
+        confirmed: "no"
+        note: >
+          Needs an administrator prompt. Writes three hive files to the Temp
+          folder; run the clean-up so they are removed.
+      - kind: manual
+        name: Export of a key below a hive (not the hive itself)
+        plain: 'reg export HKLM\SYSTEM\CurrentControlSet\Services\Tcpip %TEMP%\tcpip.reg'
+        expect: none
+        confirmed: "no"
+        note: >
+          Routine export of one key. The rule only reacts to the whole SAM,
+          SECURITY or SYSTEM hive.
+
+  - rule: sigma/techdetechtives_ntds_extraction.yml
+    title: TechDetechtives - Active Directory Database Extraction
+    technique: T1003.003
+    platform: windows
+    needs: process start events with command lines (Elastic Defend or Sysmon), on a lab domain controller
+    tests:
+      - kind: atomic
+        technique: T1003.003
+        guid: 2364e33d-ceab-4641-8468-bfb1d7cc2723
+        name: Dump Active Directory Database with NTDSUtil
+        run: 'Invoke-AtomicTest T1003.003 -TestGuids 2364e33d-ceab-4641-8468-bfb1d7cc2723'
+        expect: alert
+        confirmed: "no"
+        note: >
+          Only works on a domain controller, and only do this on a lab one: the
+          output folder holds every account's password hash. Run the clean-up.
+
+  - rule: sigma/techdetechtives_recovery_inhibited.yml
+    title: TechDetechtives - Backups or Recovery Options Destroyed
+    technique: T1490
+    platform: windows
+    needs: process start events with command lines (Elastic Defend or Sysmon)
+    tests:
+      - kind: manual
+        name: Shadow copy deletion aimed at a drive that does not exist
+        plain: 'vssadmin.exe delete shadows /for=Z: /quiet'
+        expect: alert
+        confirmed: "no"
+        note: >
+          Matches on the command line and deletes nothing when there is no Z:
+          drive. Check that first.
+      - kind: atomic
+        technique: T1490
+        guid: 43819286-91a9-4369-90ed-d31fb4da2c01
+        name: Windows - Delete Volume Shadow Copies
+        run: 'Invoke-AtomicTest T1490 -TestGuids 43819286-91a9-4369-90ed-d31fb4da2c01'
+        expect: alert
+        confirmed: "no"
+        note: >
+          Destructive: removes every restore point on the lab endpoint. Use the
+          harmless command above unless you mean to test that.
+
+  - rule: sigma/techdetechtives_event_logs_cleared.yml
+    title: TechDetechtives - Windows Event Logs Cleared From the Command Line
+    technique: T1685.005
+    platform: windows
+    needs: process start events with command lines (Elastic Defend or Sysmon)
+    tests:
+      - kind: manual
+        name: Clearing a log that does not exist
+        plain: 'wevtutil cl TechDetechtivesTestLog'
+        expect: alert
+        confirmed: "no"
+        note: >
+          Fails with 'channel not found' and clears nothing, but the command line
+          is what the rule looks at.
+      - kind: atomic
+        technique: T1685.005
+        guid: e6abb60e-26b8-41da-8aae-0c35174b0967
+        name: Clear Logs
+        run: 'Invoke-AtomicTest T1685.005 -TestGuids e6abb60e-26b8-41da-8aae-0c35174b0967'
+        expect: alert
+        confirmed: "no"
+        note: >
+          Destructive: empties the System log on the lab endpoint. Atomic Red Team
+          files this test under T1685.005, the current number for clearing Windows
+          event logs.
+
+  - rule: sigma/techdetechtives_defender_tampering.yml
+    title: TechDetechtives - Microsoft Defender Protection Switched Off or Excluded
+    technique: T1685
+    platform: windows
+    needs: process start events with command lines (Elastic Defend or Sysmon)
+    tests:
+      - kind: atomic
+        technique: T1685
+        guid: 0b19f4ee-de90-4059-88cb-63c800c683ed
+        name: Tamper with Windows Defender Evade Scanning -Folder
+        run: 'Invoke-AtomicTest T1685 -TestGuids 0b19f4ee-de90-4059-88cb-63c800c683ed'
+        expect: alert
+        confirmed: "no"
+        note: >
+          Adds C:\Temp as a Defender exclusion; the clean-up removes it. Run the
+          clean-up straight away so the endpoint is not left with an unscanned
+          folder.
+
+  - rule: sigma/techdetechtives_office_spawns_interpreter.yml
+    title: TechDetechtives - Office Application Starting a Script Interpreter
+    technique: T1204.002
+    platform: windows
+    needs: process start events with command lines (Elastic Defend or Sysmon); Microsoft Office installed on the endpoint
+    tests:
+      - kind: atomic
+        technique: T1204.002
+        guid: 9215ea92-1ded-41b7-9cd6-79f9a78397aa
+        name: Office launching .bat file from AppData
+        run: 'Invoke-AtomicTest T1204.002 -TestGuids 9215ea92-1ded-41b7-9cd6-79f9a78397aa'
+        expect: alert
+        confirmed: "no"
+        note: >
+          Needs Word installed and internet access (it downloads a helper script
+          from the Atomic Red Team repository). Word starts cmd.exe to run a batch
+          file.
+
+  - rule: sigma/techdetechtives_signed_binary_remote_script.yml
+    title: TechDetechtives - mshta or regsvr32 Running Script From a Remote Address
+    technique: T1218.005
+    platform: windows
+    needs: process start events with command lines (Elastic Defend or Sysmon)
+    tests:
+      - kind: atomic
+        technique: T1218.005
+        guid: 8707a805-2b76-4f32-b1c0-14e558205772
+        name: Mshta used to Execute PowerShell
+        run: 'Invoke-AtomicTest T1218.005 -TestGuids 8707a805-2b76-4f32-b1c0-14e558205772'
+        expect: alert
+        confirmed: "no"
+        note: >
+          mshta runs an inline script that prints a line with PowerShell. Nothing
+          is downloaded.
+      - kind: atomic
+        technique: T1218.010
+        guid: c9d0c4ef-8a96-4794-a75b-3d3a5e6f2a36
+        name: Regsvr32 remote COM scriptlet execution
+        run: 'Invoke-AtomicTest T1218.010 -TestGuids c9d0c4ef-8a96-4794-a75b-3d3a5e6f2a36'
+        expect: alert
+        confirmed: "no"
+        note: >
+          Needs internet access: regsvr32 loads a scriptlet from the Atomic Red
+          Team repository, which opens the calculator.
+      - kind: atomic
+        technique: T1218.010
+        guid: 449aa403-6aba-47ce-8a37-247d21ef0306
+        name: Regsvr32 local COM scriptlet execution
+        run: 'Invoke-AtomicTest T1218.010 -TestGuids 449aa403-6aba-47ce-8a37-247d21ef0306'
+        expect: none
+        confirmed: "no"
+        note: >
+          Known limit. The scriptlet is loaded from a local file, and the rule
+          only reacts to a remote address.
+
+  - rule: sigma/techdetechtives_certutil_download_or_decode.yml
+    title: TechDetechtives - certutil Used to Download or Decode a File
+    technique: T1105
+    platform: windows
+    needs: process start events with command lines (Elastic Defend or Sysmon)
+    tests:
+      - kind: atomic
+        technique: T1105
+        guid: dd3b61dd-7bbc-48cd-ab51-49ad1a776df0
+        name: certutil download (urlcache)
+        run: 'Invoke-AtomicTest T1105 -TestGuids dd3b61dd-7bbc-48cd-ab51-49ad1a776df0'
+        expect: alert
+        confirmed: "no"
+        note: >
+          Needs internet access. Downloads a licence text file; run the clean-up
+          to remove it.
+      - kind: atomic
+        technique: T1140
+        guid: dc6fe391-69e6-4506-bd06-ea5eeb4082f8
+        name: Deobfuscate/Decode Files Or Information
+        run: 'Invoke-AtomicTest T1140 -TestGuids dc6fe391-69e6-4506-bd06-ea5eeb4082f8'
+        expect: alert
+        confirmed: "no"
+        note: >
+          Encodes and decodes a copy of the calculator in the Temp folder. Run the
+          clean-up.
+
+  - rule: sigma/techdetechtives_scheduled_task_suspicious_action.yml
+    title: TechDetechtives - Scheduled Task Created to Run a Script or a User-Writable File
+    technique: T1053.005
+    platform: windows
+    needs: process start events with command lines (Elastic Defend or Sysmon)
+    tests:
+      - kind: atomic
+        technique: T1053.005
+        guid: 6731e8a0-5aeb-4180-8a90-4f8852e56de6
+        name: Turla KopiLuwak Scheduled Task for JavaScript Stager
+        run: 'Invoke-AtomicTest T1053.005 -TestGuids 6731e8a0-5aeb-4180-8a90-4f8852e56de6'
+        expect: alert
+        confirmed: "no"
+        note: >
+          Registers a logon task that would run a script from the AppData folder.
+          The script does not exist, so nothing runs. Run the clean-up to remove
+          the task.
+      - kind: atomic
+        technique: T1053.005
+        guid: 42f53695-ad4a-4546-abb6-7d837f644a71
+        name: Scheduled task Local
+        run: 'Invoke-AtomicTest T1053.005 -TestGuids 42f53695-ad4a-4546-abb6-7d837f644a71'
+        expect: none
+        confirmed: "no"
+        note: >
+          Known limit. The task runs a program from the Windows folder with no
+          script or user-writable path, which the rule treats as ordinary.
+
+  - rule: sigma/techdetechtives_service_created_suspicious_binary.yml
+    title: TechDetechtives - Service Created to Run a Script or a User-Writable File
+    technique: T1543.003
+    platform: windows
+    needs: process start events with command lines (Elastic Defend or Sysmon)
+    tests:
+      - kind: manual
+        name: Service whose program is a command interpreter
+        plain: 'sc.exe create TDTest binPath= "cmd.exe /c echo td" start= demand'
+        expect: alert
+        confirmed: "no"
+        note: >
+          Needs an administrator prompt. The service is created but never started.
+          Remove it afterwards with: sc.exe delete TDTest
+      - kind: atomic
+        technique: T1543.003
+        guid: 981e2942-e433-44e9-afc1-8c957a1496b6
+        name: Service Installation CMD
+        run: 'Invoke-AtomicTest T1543.003 -TestGuids 981e2942-e433-44e9-afc1-8c957a1496b6'
+        expect: none
+        confirmed: "no"
+        note: >
+          Known limit. The service program sits in the Atomic Red Team folder, not
+          in a user-writable or temporary one, so the rule stays quiet.
+
+  - rule: sigma/techdetechtives_linux_reverse_shell.yml
+    title: TechDetechtives - Reverse Shell Command Line on Linux
+    technique: T1059.004
+    platform: linux
+    needs: process start events with command lines from the Linux endpoint (Elastic Defend)
+    tests:
+      - kind: manual
+        name: Shell redirected to a local port that nothing listens on
+        plain: 'bash -c ''echo test > /dev/tcp/127.0.0.1/9'''
+        expect: alert
+        confirmed: "no"
+        note: >
+          Tries to connect to this same machine and fails; nothing leaves it. The
+          command line has the form a reverse shell uses.
+
+  - rule: sigma/techdetechtives_ot_bacnet_device_disabled_or_restarted.yml
+    title: TechDetechtives - BACnet Device Told to Restart or Stop Communicating
+    technique: T0816
+    platform: ot
+    needs: the platform sensor seeing the traffic of an OT lab (simulators are enough)
+    tests:
+      - kind: manual
+        name: ReinitializeDevice sent to a BACnet simulator
+        plain: 'bacrd <device instance> 0'
+        expect: alert
+        confirmed: "no"
+        note: >
+          bacrd is the ReinitializeDevice tool of the open-source bacnet-stack
+          project. Send it only to a simulator or a test controller: a real one
+          restarts.
+
+  - rule: sigma/techdetechtives_ot_bacnet_objects_changed.yml
+    title: TechDetechtives - BACnet Objects Created, Deleted or Files Written
+    technique: T0843
+    platform: ot
+    needs: the platform sensor seeing the traffic of an OT lab (simulators are enough)
+    tests:
+      - kind: manual
+        name: File written to a BACnet simulator
+        plain: 'bacawf <device instance> <file instance> <local file>'
+        expect: alert
+        confirmed: "no"
+        note: >
+          bacawf is the AtomicWriteFile tool of the bacnet-stack project. Use a
+          simulator or a test controller only.
+
+  - rule: sigma/techdetechtives_ot_s7_program_transfer.yml
+    title: TechDetechtives - Siemens S7 Program Downloaded to or Uploaded From a PLC
+    technique: T0843
+    platform: ot
+    needs: the platform sensor seeing the traffic of an OT lab (simulators are enough)
+    tests:
+      - kind: manual
+        name: Block upload from an S7 simulator
+        plain: 'python3 -c "import snap7; c=snap7.client.Client(); c.connect(''<simulator IP>'', 0, 1); c.full_upload(snap7.type.Block.OB, 1)"'
+        expect: alert
+        confirmed: "no"
+        note: >
+          Uses the open-source python-snap7 library against an S7-300/400
+          simulator (the snap7 server, or a PLC simulator). Never against a
+          controller that runs a process. The exact name of the block type differs
+          between python-snap7 versions.
+
 # Rules for other engines. No atomic test fits; these are single commands run
 # on a monitored lab host whose traffic passes the sensor.
 network_checks:
@@ -144,3 +472,26 @@ network_checks:
     note: >
       Must be plain http (not https) from a host inside the monitored network
       to an outside address, or the sensor cannot read the request.
+
+# OT network rules (platform/detections/suricata/techdetechtives-ot.rules).
+# Run these only against simulators or test controllers in a lab whose
+# traffic the sensor sees. Several of them stop or restart the target.
+ot_network_checks:
+  - rule: suricata/techdetechtives-ot.rules
+    sid: [1900103, 1900104]
+    plain: 'nmap -p 502 --script modbus-discover <simulator IP>'
+    expect: alert
+    confirmed: "no"
+    note: The script asks for the device identification and the server id, which is what the two low-severity inventory rules look for.
+  - rule: suricata/techdetechtives-ot.rules
+    sid: [1900151]
+    plain: 'python3 -c "import snap7; c=snap7.client.Client(); c.connect(''<simulator IP>'', 0, 1); c.plc_stop()"'
+    expect: alert
+    confirmed: "no"
+    note: Sends the S7 STOP command. A real controller would stop its process; use a simulator.
+  - rule: suricata/techdetechtives-ot.rules
+    sid: [1900121]
+    plain: 'A DNP3 master simulator sending Cold Restart to an outstation simulator'
+    expect: alert
+    confirmed: "no"
+    note: Any DNP3 test master can send this function. Use simulators on both ends.

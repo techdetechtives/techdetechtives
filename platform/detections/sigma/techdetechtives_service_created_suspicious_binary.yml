@@ -1,0 +1,44 @@
+title: TechDetechtives - Service Created to Run a Script or a User-Writable File
+id: 62469824-a2a1-51ae-8177-dcfc1cce8ca0
+status: experimental
+description: >
+  Detects sc.exe creating or reconfiguring a service whose program is a script
+  interpreter or sits in a folder any user can write to. Services run as
+  SYSTEM, so this is used for both persistence and privilege escalation.
+author: TechDetechtives
+date: 2026-10-05
+tags:
+  - attack.persistence
+  - attack.privilege_escalation
+  - attack.t1543.003
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_image:
+    Image|endswith: '\sc.exe'
+  selection_action:
+    CommandLine|contains:
+      - ' create '
+      - ' config '
+  selection_binpath:
+    CommandLine|contains: 'binpath'
+  selection_target:
+    CommandLine|contains:
+      - 'powershell'
+      - 'pwsh'
+      - 'cmd /c'
+      - 'cmd.exe /c'
+      - 'cmd /k'
+      - 'mshta'
+      - 'rundll32'
+      - 'regsvr32'
+      - '\AppData\'
+      - '\Users\Public\'
+      - '\ProgramData\'
+      - '\Windows\Temp\'
+      - '\Temp\'
+  condition: selection_image and selection_action and selection_binpath and selection_target
+falsepositives:
+  - Installers that unpack to a temporary folder before registering a service
+level: medium

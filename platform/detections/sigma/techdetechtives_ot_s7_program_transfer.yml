@@ -1,0 +1,31 @@
+title: TechDetechtives - Siemens S7 Program Downloaded to or Uploaded From a PLC
+id: a4e68afa-9ede-5b01-aa45-6092ff787ef2
+status: experimental
+description: >
+  Detects S7comm block transfers. A download changes the program a Siemens
+  S7-300/400 controller runs; an upload copies the program out of it. Both are
+  normal only from an engineering station during planned work.
+author: TechDetechtives
+date: 2026-10-05
+tags:
+  - attack.ics
+  - attack.t0843
+  - attack.t0845
+logsource:
+  product: zeek
+  service: s7comm
+  definition: 'Requirements: the platform sensor must see the S7 traffic (TCP 102). The S7comm analyzer is on by default.'
+detection:
+  selection:
+    event.dataset: 'zeek.s7comm'
+    s7.function.name:
+      - 'Request Download'
+      - 'Download Block'
+      - 'Download Ended'
+      - 'Start Upload'
+      - 'Upload'
+      - 'End Upload'
+  condition: selection
+falsepositives:
+  - Planned program changes and backups from the engineering station
+level: medium

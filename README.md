@@ -122,6 +122,7 @@ Field names follow ECS, as on the platform. [docs/FIELD-MAPPING.md](docs/FIELD-M
 
 - **Console pages:** edit `platform/branding/banner.md` and `motd.md`, then re-run the platform step.
 - **Logo, brand image, name and colours:** see [branding/README.md](branding/README.md).
+- **What is covered:** [docs/DETECTION-COVERAGE.md](docs/DETECTION-COVERAGE.md) lists the rule sets, the industrial (OT) protocols that are decoded and those that are not, and how to turn on more of the community rules.
 - **Which engine for what:** Sigma rules match ingested logs. Suricata rules match network traffic. YARA rules match files extracted from traffic, not logs. 
 - **Detections:** add Sigma rules to `platform/detections/sigma/`, Suricata rules to `suricata/` (SIDs 1900001 to 1900999 are reserved for this rule set), YARA rules to `yara/`, then re-run the platform step. Pair each new Sigma rule with a test in `platform/detections/validation.yml` ([docs/DETECTION-VALIDATION.md](docs/DETECTION-VALIDATION.md)); `scripts/verify.sh repo` checks that you did.
 - **Notebooks:** add them under `analytics/notebooks/`. New notebooks in that folder are GPL-3.0 if they build on the existing ones.
@@ -133,7 +134,7 @@ Upgrade the platform with its own upgrade tool (`soup`). The overlay lives in th
 
 ## Status
 
-Version 0.6.0. What has and has not been exercised is listed in [MODIFICATIONS.md](MODIFICATIONS.md#test-status). In short: the overlay, installers, forwarder, connector and notebook logic have automated tests against stand-ins; on a live Security Onion 2.4.211 the console pages, both access keys, DFIR-IRIS and the forwarder's connections were confirmed. Not yet seen on a live system: a rule firing, an alert becoming a ticket, the workbench image and Spark, Greenbone and its connector, the honeypot, and the rule-enable setting.
+Version 0.7.0. What has and has not been exercised is listed in [MODIFICATIONS.md](MODIFICATIONS.md#test-status). In short: the overlay, installers, forwarder, connector and notebook logic have automated tests against stand-ins; on a live Security Onion 2.4.211 the console pages, both access keys, DFIR-IRIS and the forwarder's connections were confirmed. Not yet seen on a live system: a rule firing, an alert becoming a ticket, the workbench image and Spark, Greenbone and its connector, the honeypot, and the rule-enable setting.
 
 ## Licence
 
