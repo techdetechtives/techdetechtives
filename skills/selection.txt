@@ -1,0 +1,43 @@
+# Skills taken from the community cybersecurity skills library
+# (https://github.com/mukul975/Anthropic-Cybersecurity-Skills, Apache-2.0),
+# at the commit pinned in upstream.lock. One skill name per line.
+#
+# Each one was read before it was added. To add another: read it first (these
+# files become guidance for an AI assistant), add its name here, run
+# skills/sync-skills.sh, and commit the result.
+
+# Detection engineering
+building-detection-rules-with-sigma
+performing-yara-rule-development-for-detection
+performing-malware-triage-with-yara
+performing-threat-hunting-with-yara-rules
+implementing-mitre-attack-coverage-mapping
+implementing-siem-use-case-tuning
+performing-false-positive-reduction-in-siem
+implementing-alert-fatigue-reduction
+
+# Network data (Zeek logs)
+detecting-beaconing-patterns-with-zeek
+detecting-lateral-movement-with-zeek
+detecting-exfiltration-over-dns-with-zeek
+hunting-for-dns-tunneling-with-zeek
+
+# Threat hunting
+performing-threat-hunting-with-elastic-siem
+hunting-for-anomalous-powershell-execution
+hunting-for-lateral-movement-via-wmi
+hunting-for-living-off-the-land-binaries
+hunting-for-lolbins-execution-in-endpoint-logs
+hunting-for-command-and-control-beaconing
+hunting-for-persistence-mechanisms-in-windows
+detecting-malicious-scheduled-tasks-with-sysmon
+detecting-t1055-process-injection-with-sysmon
+
+# Alert triage
+performing-alert-triage-with-elastic-siem
+triaging-security-incident
+
+# Vulnerability management
+implementing-vulnerability-management-with-greenbone
+performing-cve-prioritization-with-kev-catalog
+prioritizing-vulnerabilities-with-cvss-scoring

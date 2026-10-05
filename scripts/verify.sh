@@ -22,7 +22,7 @@ usage() { sed -n '5,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 cmd_repo() {
   local f
-  for f in LICENSE NOTICE.md MODIFICATIONS.md licenses/Elastic-License-2.0.txt licenses/GPL-3.0.txt analytics/LICENSE upstream.lock; do
+  for f in LICENSE NOTICE.md MODIFICATIONS.md licenses/Elastic-License-2.0.txt licenses/GPL-3.0.txt licenses/Apache-2.0.txt analytics/LICENSE upstream.lock skills/MANIFEST.sha256; do
     if [[ -s "$ROOT/$f" ]]; then pass "present: $f"; else fail "missing: $f"; fi
   done
   while IFS= read -r f; do
@@ -67,6 +67,54 @@ if yaml:
             if doc.get("id") in ids:
                 problems.append(f"{path.name}: duplicate rule id")
             ids.add(doc.get("id"))
+    # Every Sigma rule is paired with a test that should make it fire.
+    guid = __import__("re").compile(r"^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$")
+    try:
+        pairing = yaml.safe_load((root / "platform/detections/validation.yml").read_text())
+        paired = {}
+        for check in pairing["checks"]:
+            paired[check["rule"]] = check
+            rule_path = root / "platform/detections" / check["rule"]
+            if not rule_path.is_file():
+                problems.append(f"validation.yml: no such rule file {check['rule']}")
+                continue
+            if yaml.safe_load(rule_path.read_text()).get("title") != check.get("title"):
+                problems.append(f"validation.yml: title does not match {check['rule']}")
+            tests = check.get("tests") or []
+            if not any(test.get("expect") == "alert" for test in tests):
+                problems.append(f"validation.yml: {check['rule']} has no test that expects an alert")
+            for test in tests:
+                if test.get("kind") == "atomic" and not guid.match(str(test.get("guid", ""))):
+                    problems.append(f"validation.yml: {check['rule']}: atomic test without a valid guid")
+                if test.get("kind") not in ("atomic", "manual") or test.get("expect") not in ("alert", "none"):
+                    problems.append(f"validation.yml: {check['rule']}: test needs kind atomic|manual and expect alert|none")
+        for path in (root / "platform/detections/sigma").glob("*.yml"):
+            if f"sigma/{path.name}" not in paired:
+                problems.append(f"{path.name}: no entry in platform/detections/validation.yml")
+    except (OSError, KeyError, TypeError, yaml.YAMLError) as error:
+        problems.append(f"validation.yml: {type(error).__name__}: {error}")
+    # Skills: readable front matter, name matching the folder, usable description.
+    for path in sorted((root / "skills").glob("*/*/SKILL.md")):
+        label = f"skills/{path.parent.parent.name}/{path.parent.name}"
+        text = path.read_text(encoding="utf-8")
+        parts = text.split("\n---", 1)
+        if not text.startswith("---\n") or len(parts) != 2:
+            problems.append(f"{label}: SKILL.md has no front matter")
+            continue
+        try:
+            meta = yaml.safe_load(parts[0][4:])
+        except yaml.YAMLError as error:
+            problems.append(f"{label}: front matter: {error}")
+            continue
+        if not isinstance(meta, dict) or meta.get("name") != path.parent.name:
+            problems.append(f"{label}: name in SKILL.md does not match the folder")
+        description = str((meta or {}).get("description") or "").strip() if isinstance(meta, dict) else ""
+        if not 20 <= len(description) <= 1024:
+            problems.append(f"{label}: description must be 20 to 1024 characters")
+    selected = {line.split("#")[0].strip() for line in (root / "skills/selection.txt").read_text().splitlines()} - {""}
+    present = {p.name for p in (root / "skills/community").iterdir() if p.is_dir()}
+    if selected != present:
+        problems.append(f"skills/community does not match skills/selection.txt: {sorted(selected ^ present)}")
 sids = []
 for path in (root / "platform/detections/suricata").glob("*.rules"):
     for line in path.read_text().splitlines():
@@ -81,7 +129,23 @@ for problem in problems:
     print("   ", problem)
 sys.exit(1 if problems else 0)
 PY
-    then pass "notebooks, sample data and rules parse"; else fail "notebooks, sample data or rules have problems (listed above)"; fi
+    then pass "notebooks, sample data, rules, rule tests and skills are consistent"; else fail "notebooks, sample data, rules, rule tests or skills have problems (listed above)"; fi
+    if (cd "$ROOT/skills" && sha256sum --quiet -c MANIFEST.sha256 >/dev/null 2>&1) \
+       && [[ "$(find "$ROOT/skills/community" -type f | wc -l)" -eq "$(grep -vc '^#' "$ROOT/skills/MANIFEST.sha256")" ]]; then
+      pass "community skills match their manifest"
+    else
+      fail "community skills differ from skills/MANIFEST.sha256 (run: cd skills && sha256sum -c MANIFEST.sha256)"
+    fi
+    if python3 -m unittest discover -s "$ROOT/platform/tests" >/dev/null 2>&1; then
+      pass "rule settings tests"
+    else
+      fail "rule settings tests (run: python3 -m unittest discover -s platform/tests -v)"
+    fi
+    if bash "$ROOT/platform/tests/test_overlay.sh" >/dev/null 2>&1; then
+      pass "overlay test against a mock platform"
+    else
+      fail "overlay test (run: platform/tests/test_overlay.sh)"
+    fi
     if python3 -m unittest discover -s "$ROOT/ticketing/tests" >/dev/null 2>&1; then
       pass "forwarder tests"
     else

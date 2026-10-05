@@ -25,7 +25,10 @@ Scope of this licence
 
 This MIT licence covers the original TechDetechtives files in this repository,
 EXCEPT the analytics/ directory, which is derived from HELK and is licensed
-under the GNU General Public License v3.0 (see analytics/LICENSE).
+under the GNU General Public License v3.0 (see analytics/LICENSE), and the
+skills/community/ directory, which holds unchanged documents from the community
+cybersecurity skills library under the Apache License 2.0 (see
+licenses/Apache-2.0.txt and skills/README.md).
 
 It does not cover Security Onion, which this repository installs on top of but
 does not contain. Security Onion is licensed under the Elastic License 2.0

@@ -3,8 +3,9 @@
 # Copyright (c) 2026 TechDetechtives. MIT licence (see LICENSE).
 #
 # Usage:
-#   sudo scripts/install.sh platform [--dry-run] [--no-salt] [--jupyter-url URL] [--tickets-url URL] [--vuln-url URL] [--brand-image-url URL|none]
-#        Run on the Security Onion manager. Applies branding and detections.
+#   sudo scripts/install.sh platform [--dry-run] [--no-salt] [--no-auto-enable] [--jupyter-url URL] [--tickets-url URL] [--vuln-url URL] [--brand-image-url URL|none]
+#        Run on the Security Onion manager. Applies branding and detections, and
+#        sets the platform to switch the TechDetechtives rules on when it imports them.
 #   scripts/install.sh analytics
 #        Run on the analytics host. Builds and starts the notebook workbench.
 #   scripts/install.sh analytics-down
@@ -19,6 +20,9 @@
 #        starts the connector with the vulnerability dashboard and reports pages.
 #   scripts/install.sh vulnerability-down
 #        Stop the connector and Greenbone (scan data is kept).
+#   scripts/install.sh skills [--target DIR] [--only-techdetechtives]
+#        Run where your AI assistant runs. Installs the analyst skills
+#        (see skills/README.md).
 #
 # Security Onion itself is not installed by this script. Install it first from
 # the official ISO or installer, then run the platform step.
@@ -32,7 +36,7 @@ COMPOSE_FILE="$ROOT/analytics/docker-compose.yml"
 log()  { printf '[techdetechtives] %s\n' "$*"; }
 warn() { printf '[techdetechtives] WARNING: %s\n' "$*" >&2; }
 die()  { printf '[techdetechtives] ERROR: %s\n' "$*" >&2; exit 1; }
-usage() { sed -n '5,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '5,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 env_value() {
   # Read KEY from the env file without sourcing it.
@@ -49,8 +53,37 @@ new_token() {
   fi
 }
 
+platform_ip() {
+  # The platform's address as this host resolves it (DNS or /etc/hosts).
+  # Prints nothing when TD_ES_HOST is empty; stops when the name is unknown.
+  local host ip
+  host="$(env_value TD_ES_HOST)"
+  [[ -n "$host" ]] || return 0
+  if [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    printf '%s\n' "$host"
+    return 0
+  fi
+  ip="$(getent ahostsv4 "$host" 2>/dev/null | awk '{print $1; exit}')" || true
+  if [[ -z "$ip" ]]; then
+    die "this host cannot find the platform by name ($host). Add it to /etc/hosts, for example:
+    echo '<platform IP>  $host' | sudo tee -a /etc/hosts
+then run this command again."
+  fi
+  printf '%s\n' "$ip"
+}
+
 compose() {
   docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
+}
+
+low_memory_note() {
+  # $1 = what is about to start, $2 = memory it wants in MB.
+  local free
+  free="$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo 2>/dev/null)" || true
+  if [[ -n "$free" && "$free" -lt "$2" ]]; then
+    warn "$1 wants about $2 MB of free memory; this host has $free MB free."
+    warn "It may be slow or stop. Give the machine more memory, or stop a part you are not using."
+  fi
 }
 
 require_docker() {
@@ -88,12 +121,24 @@ prepare_env() {
 cmd_analytics() {
   require_docker
   prepare_env
-  log "building and starting the analytics workbench"
+  local platform_address
+  platform_address="$(platform_ip)"
+  if [[ -n "$platform_address" ]]; then
+    log "platform $(env_value TD_ES_HOST) is at $platform_address"
+    export TD_ES_IP="$platform_address"
+  fi
+  low_memory_note "the workbench" 3072
+  log "building and starting the analytics workbench (the first build downloads about 1 GB)"
   compose up -d --build
   local bind port
   bind="$(env_value TD_JUPYTER_BIND)"; port="$(env_value TD_JUPYTER_PORT)"
   log "workbench started: http://${bind:-127.0.0.1}:${port:-8888}/lab"
   log "sign in with the TD_JUPYTER_TOKEN value from $ENV_FILE"
+  if [[ "${bind:-127.0.0.1}" == "127.0.0.1" ]]; then
+    log "it only answers on this machine. From your own computer, open a tunnel first:"
+    log "  ssh -L ${port:-8888}:127.0.0.1:${port:-8888} $(id -un)@<this machine's address>"
+    log "then browse to http://127.0.0.1:${port:-8888}/lab"
+  fi
   log "check it with: scripts/verify.sh analytics"
 }
 
@@ -120,6 +165,7 @@ cmd_ticketing() {
   if [[ "$cert" == /certs/* && ! -f "$ROOT/analytics/certs/${cert#/certs/}" ]]; then
     die "CA certificate analytics/certs/${cert#/certs/} is missing. Copy /etc/pki/ca.crt from the manager to that path."
   fi
+  platform_ip >/dev/null
   log "building and starting the alert-to-ticket forwarder"
   forwarder_compose up -d --build
   local minimum
@@ -154,6 +200,7 @@ cmd_vulnerability() {
     if [[ "$cert" == /certs/* && ! -f "$ROOT/analytics/certs/${cert#/certs/}" ]]; then
       die "CA certificate analytics/certs/${cert#/certs/} is missing. Copy /etc/pki/ca.crt from the manager to that path."
     fi
+    platform_ip >/dev/null
   fi
   if [[ -z "$(env_value TD_IRIS_API_KEY)" ]]; then
     warn "DFIR-IRIS is not set up on this host: vulnerability tickets are off. Run scripts/install.sh ticketing first to enable them."
@@ -181,6 +228,7 @@ case "${1:-}" in
   ticketing-down) cmd_ticketing_down ;;
   vulnerability)      shift; cmd_vulnerability "$@" ;;
   vulnerability-down) cmd_vulnerability_down ;;
+  skills)         shift; exec "$ROOT/skills/install-skills.sh" "$@" ;;
   -h|--help)      usage ;;
   *)              usage >&2; exit 2 ;;
 esac

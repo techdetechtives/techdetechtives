@@ -13,6 +13,7 @@ Applied by `platform/apply-overlay.sh` on the manager node. First applied in ver
 | Sigma rules | `/nsm/rules/custom-local-repos/local-sigma` | 4 rule files added and committed |
 | Suricata rules | `/nsm/rules/custom-local-repos/local-suricata` | 1 rule file (2 rules, SIDs 1900001 and 1900002) added and committed |
 | YARA rules | `/nsm/rules/custom-local-repos/local-yara` | 1 rule file added and committed |
+| Which rules are switched on at import | `/opt/so/saltstack/local/pillar/soc/soc_soc.sls`, settings `enabledSigmaRules` and `autoEnabledYaraRules` | The local Sigma and YARA rulesets are added to the platform's own lists (the same settings as Administration, Configuration in the console). Other settings in the file are kept; the file is rewritten in the platform's own format and the previous copy is backed up. Since 0.5.0; skipped with `--no-auto-enable`. |
 
 Applied by `platform/create-readonly-key.sh`:
 
@@ -21,11 +22,11 @@ Applied by `platform/create-readonly-key.sh`:
 | Elasticsearch API keys | One read-only key named `techdetechtives-analytics-ro` is created (read access to `logs-*` and `so-*`) |
 | Firewall | With `--allow-ip`, the analytics host is added to the `elasticsearch_rest` host group (port 9200) |
 
-Rules from the local repositories are imported **disabled**. Enable them in the console under Detections after the first import.
+The platform applies the switch-on setting only the first time it imports a rule. Rules it imported earlier (for example with an overlay older than 0.5.0) stay disabled until enabled once in the console under Detections. `sudo platform/apply-overlay.sh rules` lists each rule's state; it only reads.
 
 **Not changed:** Security Onion's source code, container images, logo, licence notices, licence-key functionality, and Pro features. Both console pages state that the deployment is modified and what it is built on.
 
-Backups are stored under `/nsm/backup/techdetechtives/`. `sudo platform/apply-overlay.sh revert` restores the previous pages and removes the rules.
+Backups are stored under `/nsm/backup/techdetechtives/`. `sudo platform/apply-overlay.sh revert` restores the previous pages, removes the rules, and takes the local rulesets back out of the two settings.
 
 ## Changes relative to HELK
 
@@ -44,6 +45,8 @@ Everything under `analytics/`. Changed by TechDetechtives, 2026-10-04.
 | `tutorials/06-Intro_pyspark_graphframes_sysmon.ipynb` | Reworked as `04_process_tree_graph.ipynb`; NetworkX instead of GraphFrames |
 | Sample data set captured from an attack simulation | Replaced by small synthetic sample data written for this project |
 | Sigma notebooks, Kibana dashboards, Logstash pipelines | Not carried over. Detections run on the platform. |
+
+Changed 2026-10-05 (0.5.0): Spark's driver is bound to the container's loopback address and its web interface is off; the Compose file passes the platform's address to the container (`extra_hosts`), looked up on the host by the installer.
 
 ## Ticketing
 
@@ -64,38 +67,44 @@ Added in version 0.3.0, 2026-10-04. Original work; nothing here modifies Securit
 | Platform | One API key named `techdetechtives-vulnerability-ingest` is created by `platform/create-ingest-key.sh`. It can only append to the `logs-greenbone.results-*` data stream, which the connector fills with scan findings. The overview page gains links to the ticketing and vulnerability pages. |
 | DFIR-IRIS | No change. The connector opens tickets through its API. |
 
+## Analyst skills
+
+Added in 0.5.0. `skills/community/` holds documents copied **unchanged** from the community cybersecurity skills library (Apache-2.0; commit in `upstream.lock`): `SKILL.md`, `LICENSE`, `references/` and `assets/` for the 26 skills in `skills/selection.txt`. The upstream `scripts/` folders and translations were left out. Checksums are in `skills/MANIFEST.sha256`. The four skills under `skills/techdetechtives/` are original.
+
 ## Test status
 
-As of 0.4.1.
+As of 0.5.0.
 
-Tested:
+Confirmed on a live system (Security Onion 2.4.211 standalone, with a second VM; 2026-10-04 and 2026-10-05):
 
-- `platform/apply-overlay.sh` apply, re-apply, status, dry-run and revert, against a mock of the Security Onion directory layout.
-- `scripts/install.sh analytics` configuration handling and the container entrypoint's token check, with a stand-in for Docker.
-- `scripts/fetch-upstream.sh` against GitHub.
+- The login banner and overview page, in the browser.
+- `platform/create-readonly-key.sh` and `platform/create-ingest-key.sh` created their keys.
+- `scripts/install.sh ticketing`: DFIR-IRIS 2.4.29 came up (5 of 5 services) and sign-in worked; the forwarder image built and started.
+- `scripts/verify.sh ticketing`: the forwarder connected to the platform (Elasticsearch 9.0.8) with the read-only key and to DFIR-IRIS.
+
+Tested with automated checks or stand-ins:
+
+- `platform/apply-overlay.sh` apply, re-apply, status, rules, dry-run, `--no-auto-enable` and revert, against a mock of the platform's folders (`platform/tests/test_overlay.sh`, 19 checks).
+- The rule-settings helper: 8 unit tests, and a run against the real default settings files of Security Onion 2.4.211 and 3.3.0.
+- `scripts/install.sh analytics` configuration handling, platform name lookup and the container entrypoint's token check, with a stand-in for Docker. `docker compose config` accepts the Compose files.
+- `scripts/fetch-upstream.sh` and `skills/sync-skills.sh` against GitHub; a fresh fetch reproduces `skills/MANIFEST.sha256`.
+- `skills/install-skills.sh` install, re-install, skip-existing and remove.
+- `platform/detections/validation.yml`: every test id and name was checked against the Atomic Red Team definitions at the pinned commit.
 - `td_hunt` sample-data loading, flattening, Spark preparation and process-tree functions.
 - Every notebook code cell, executed on the sample data with pandas. For the Spark SQL cells, an SQLite stand-in ran the same SQL text.
-- `docker compose config` accepts the Compose file. `scripts/verify.sh repo` passes.
-
-- Applied to a live Security Onion 2.4.211 standalone install (2026-10-04): the login banner and overview page were confirmed in the browser. Rule import and rule matching on that install are not yet confirmed.
-
 - Forwarder: 17 automated tests against local stand-ins for the platform and DFIR-IRIS, covering severity filtering, one ticket per alert, no duplicates across cycles and restarts, late-arriving alerts, outages, rejected alerts, the per-cycle cap, thousands of alerts sharing one timestamp, ticket contents and credentials.
-- `ticketing/setup-iris.sh`: fetching DFIR-IRIS 2.4.29, secret generation, re-run behaviour and the TLS certificate, with a stand-in for Docker. The forwarder was confirmed to trust that certificate and to refuse others.
-- Vulnerability connector: 33 automated tests against local stand-ins for Greenbone, the platform and DFIR-IRIS, covering report sync, the "currently open" view, platform delivery without duplicates, ticket rules, outages, sign-in, markup and spreadsheet-formula injection from scan text, CSV export, and branding (custom name, colours and logo, with safe fallbacks).
+- Vulnerability connector: 33 automated tests against local stand-ins for Greenbone, the platform and DFIR-IRIS, covering report sync, the "currently open" view, platform delivery without duplicates, ticket rules, outages, sign-in, markup and spreadsheet-formula injection from scan text, CSV export, and branding.
 - Dashboard and reports pages: rendered with synthetic scan data and checked by eye in light and dark mode and at a narrow width. The severity colours pass an automated check for colour-blind readers.
 - `vulnerability/setup-greenbone.sh`: fetching the pinned setup, the generated override (confirmed with `docker compose config` to publish only port 9443), certificate, secrets and re-runs, with a stand-in for Docker.
 
 Not yet tested:
 
-- Rule import and matching on a live install; the Sigma rules have not been run through the platform's Sigma conversion.
-- `platform/create-readonly-key.sh` (needs a live manager).
-- Building the container image, and running Spark and JupyterLab in it. Package versions in `analytics/requirements.txt` are ranges that have not been resolved in a build.
-- `td_hunt` against a live Elasticsearch.
-- DFIR-IRIS has not been started from this setup, and the forwarder has not posted to a real DFIR-IRIS or read from a real platform. The alert fields and API calls were written from the Security Onion 2.4.211 and DFIR-IRIS 2.4.29 source code.
-- The forwarder container image has not been built.
-- Greenbone has not been started from this setup. The connector has not read from a real Greenbone: its protocol handling was written from the published protocol and tested against a stand-in, so field names in real responses may need adjusting.
-- `platform/create-ingest-key.sh`, and writing findings to a real platform data stream.
-- The vulnerability connector container image has not been built.
-- The Suricata and YARA rules have not been run through their engines' syntax checks.
+- The rule-enable setting on a live platform: that the console accepts the rewritten settings file and switches newly imported local rules on.
+- `platform/apply-overlay.sh rules` against a live detection list (its query was written from the platform's index mapping).
+- Any rule firing on a live install. The Sigma rules have not been run through the platform's Sigma conversion, the Suricata and YARA rules have not been through their engines' syntax checks, and none of the tests in `validation.yml` has been run; each entry says `confirmed: "no"`.
+- An alert becoming a DFIR-IRIS ticket end to end (the forwarder is connected, but no alert at medium or above had occurred when it was checked).
+- Building the workbench container image, and running Spark and JupyterLab in it. Package versions in `analytics/requirements.txt` are ranges that have not been resolved in a build. `td_hunt` has not read from a live Elasticsearch.
+- Greenbone has not been started from this setup. The connector has not read from a real Greenbone: its protocol handling was written from the published protocol and tested against a stand-in, so field names in real responses may need adjusting. Its container image has not been built, and findings have not been written to a real platform data stream.
+- The skills have not been tried with an assistant on a live deployment. The community skills are included as their authors wrote them; see `skills/README.md` for their limits.
 
 `scripts/verify.sh analytics` runs a self-test inside the container that covers Spark and the platform connection.

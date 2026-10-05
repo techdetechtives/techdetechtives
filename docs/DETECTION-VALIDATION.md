@@ -1,0 +1,64 @@
+# Detection validation
+
+Each TechDetechtives detection rule is paired with a small test that should make it fire. Running the test on a lab endpoint and seeing the alert arrive (and the ticket after it) is how you know the rule, the data collection and the ticketing all work.
+
+The pairing is kept next to the rules in [`platform/detections/validation.yml`](../platform/detections/validation.yml). `scripts/verify.sh repo` fails if a Sigma rule has no entry.
+
+## Where the tests come from
+
+Most tests are from [Atomic Red Team](https://github.com/redcanaryco/atomic-red-team) (Red Canary, MIT licence), a public library of small, self-contained tests mapped to MITRE ATT&CK techniques. TechDetechtives does not copy it: the file names each test by its permanent id at a pinned commit, and you install the runner on the lab endpoint yourself. Where no stock test fits a rule, the file gives a single harmless command instead.
+
+## Current pairing
+
+| Rule | Technique | Test | Expected |
+| --- | --- | --- | --- |
+| WMI Provider Host Spawning a Script Interpreter | T1047 | Atomic "WMI Execute Local Process", with the program set to `cscript.exe` | Alert |
+| | | Atomic "Create a Process using WMI Query and an Encoded Command" (starts Notepad) | No alert: the rule only watches interpreters |
+| PowerShell Encoded Command With Hidden Window | T1059.001 | One command: encoded `Write-Output` in a hidden window | Alert |
+| | | Atomic "PowerShell Command Execution" (`powershell.exe -e ...`, visible window) | No alert: a known limit, see the file |
+| PowerShell Script Decodes Base64 and Invokes the Result | T1059.001 | Atomic "PowerShell Fileless Script Execution" | Alert (needs Script Block Logging) |
+| Download Piped Directly Into a Shell | T1059.004 | Atomic "Detecting pipe-to-shell" and "Command-Line Interface" | Alert (endpoint needs internet access) |
+| Suricata 1900001, dynamic DNS query | | `nslookup td-test.duckdns.org` | Alert |
+| Suricata 1900002, PowerShell user agent | | `Invoke-WebRequest http://example.com` over plain http | Alert |
+| YARA `TechDetechtives_Script_Base64_Decode_And_Invoke` | | None yet: needs a file carried over unencrypted traffic past the sensor | |
+
+**None of these has been run on a live platform yet.** The expectations come from reading the rules and the test definitions. Each entry has a `confirmed` field for you to fill in.
+
+## What you need
+
+- A **lab endpoint you own** (a Windows VM for the first three rules, a Linux VM for the fourth) that is enrolled in the platform with Elastic Agent, so its process events arrive. Do not use the platform itself or the ticketing machine.
+- For the Base64 rule: PowerShell Script Block Logging turned on for that endpoint.
+- Optional: [Invoke-AtomicRedTeam](https://github.com/redcanaryco/invoke-atomicredteam/wiki) on the endpoint. Most entries also give a plain command that needs nothing installed.
+
+Endpoint protection may block a test. Leave it on; "blocked" is a result worth recording.
+
+## Running a check
+
+1. On the platform, confirm the rules are on: `sudo platform/apply-overlay.sh rules`.
+2. In the console's Hunt screen, confirm the endpoint is sending the data named in the entry's `needs` line.
+3. On the lab endpoint, look at what the test does, then run it:
+
+   ```powershell
+   Invoke-AtomicTest T1047 -TestGuids b3bdfc91-b33e-4c6d-a5c8-d64bee0276b3 -ShowDetails
+   Invoke-AtomicTest T1047 -TestGuids b3bdfc91-b33e-4c6d-a5c8-d64bee0276b3 -InputArgs @{ "process_to_execute" = "cscript.exe" }
+   ```
+
+   or the entry's `plain` command, here `wmic process call create cscript.exe`.
+4. Wait a few minutes (Sigma rules run on a schedule), then search the console's Alerts screen for the rule title.
+5. The alert is medium severity, so a DFIR-IRIS ticket should follow a minute or two later.
+6. Clean up: the same `Invoke-AtomicTest` command with `-Cleanup`.
+7. Write the date and platform version into the entry's `confirmed` field and commit it.
+
+Run one test at a time, and only the tests in the file. Running a whole technique or the whole library starts many tests at once, including ones that dump credentials or download tools.
+
+## If the alert does not arrive
+
+Look for the event first (Hunt, same time window). No event means the endpoint is not sending that data. An event without an alert means the rule is off, has not synced yet, or does not match the fields as the platform stores them; fix the rule in `platform/detections/`, run `sudo scripts/install.sh platform`, and repeat the same test.
+
+## Adding a rule
+
+Add its entry to `validation.yml` in the same change. `scripts/fetch-upstream.sh atomic-red-team` downloads the test definitions at the pinned commit so you can find a fitting test and its id.
+
+## Not built yet
+
+A checker that runs after a test and reports pass or fail by asking the platform for the expected alert, and a coverage page showing which techniques have a confirmed rule. Both can read `validation.yml` as it is.

@@ -1,0 +1,146 @@
+# TechDetechtives: which test proves each detection rule fires.
+# Copyright (c) 2026 TechDetechtives. MIT licence (see LICENSE).
+#
+# Every Sigma rule in this folder has an entry (scripts/verify.sh repo checks).
+# "atomic" tests are from Atomic Red Team (Red Canary, MIT licence), named by
+# their permanent test id so they survive renumbering. Nothing from Atomic Red
+# Team is copied here. "manual" tests are single harmless commands.
+#
+# Run tests only on a lab endpoint you own that reports to the platform.
+# Procedure: docs/DETECTION-VALIDATION.md
+#
+# expect: alert  the rule should raise an alert
+# expect: none   the rule should stay quiet; the entry records a known limit
+#
+# These expectations come from reading the rules and the test definitions.
+# The "confirmed" field stays "no" until someone has run the test and seen the
+# result on a live platform; write the date and platform version there.
+
+atomic_red_team:
+  repository: https://github.com/redcanaryco/atomic-red-team
+  commit: 388942adbd9641f4dfdcf079d7efe9a75ec0ac43
+
+checks:
+  - rule: sigma/techdetechtives_wmi_spawns_script_interpreter.yml
+    title: TechDetechtives - WMI Provider Host Spawning a Script Interpreter
+    technique: T1047
+    platform: windows
+    needs: process start events from the endpoint (Elastic Defend or Sysmon)
+    tests:
+      - kind: atomic
+        technique: T1047
+        guid: b3bdfc91-b33e-4c6d-a5c8-d64bee0276b3
+        name: WMI Execute Local Process
+        run: 'Invoke-AtomicTest T1047 -TestGuids b3bdfc91-b33e-4c6d-a5c8-d64bee0276b3 -InputArgs @{ "process_to_execute" = "cscript.exe" }'
+        plain: 'wmic process call create cscript.exe'
+        expect: alert
+        confirmed: "no"
+        note: >
+          The test's default program is notepad.exe, which this rule does not
+          watch, so the argument is changed to a script interpreter. cscript.exe
+          is used because the test's clean-up ends every process with that
+          name; do not substitute cmd.exe or powershell.exe. Where wmic is no
+          longer installed, use: powershell -Command "Invoke-WmiMethod -Class
+          Win32_Process -Name Create -ArgumentList 'cscript.exe'"
+      - kind: atomic
+        technique: T1047
+        guid: 7db7a7f9-9531-4840-9b30-46220135441c
+        name: Create a Process using WMI Query and an Encoded Command
+        run: 'Invoke-AtomicTest T1047 -TestGuids 7db7a7f9-9531-4840-9b30-46220135441c'
+        expect: none
+        confirmed: "no"
+        note: >
+          Starts notepad.exe through WMI. The rule only watches interpreters,
+          so no alert is expected. Close the notepad window afterwards.
+
+  - rule: sigma/techdetechtives_powershell_encoded_hidden.yml
+    title: TechDetechtives - PowerShell Encoded Command With Hidden Window
+    technique: T1059.001
+    platform: windows
+    needs: process start events with command lines (Elastic Defend or Sysmon)
+    tests:
+      - kind: manual
+        name: Encoded command in a hidden window (prints one line of text)
+        plain: 'powershell.exe -WindowStyle Hidden -EncodedCommand VwByAGkAdABlAC0ATwB1AHQAcAB1AHQAIAAnAFQAZQBjAGgARABlAHQAZQBjAGgAdABpAHYAZQBzACAAZABlAHQAZQBjAHQAaQBvAG4AIAB0AGUAcwB0ACcA'
+        expect: alert
+        confirmed: "no"
+        note: >
+          No stock atomic test combines an encoded command with a hidden
+          window. The encoded text is: Write-Output 'TechDetechtives detection test'
+      - kind: atomic
+        technique: T1059.001
+        guid: a538de64-1c74-46ed-aa60-b995ed302598
+        name: PowerShell Command Execution
+        run: 'Invoke-AtomicTest T1059.001 -TestGuids a538de64-1c74-46ed-aa60-b995ed302598'
+        expect: none
+        confirmed: "no"
+        note: >
+          Known limit. The test runs "powershell.exe -e <encoded>" with a
+          visible window. The rule requires a hidden window as well, and does
+          not list the short form "-e", so it stays quiet. Encoded commands
+          alone are common in administration; cover them with a separate
+          lower-level rule if you want to see them.
+
+  - rule: sigma/techdetechtives_powershell_base64_decode_and_invoke.yml
+    title: TechDetechtives - PowerShell Script Decodes Base64 and Invokes the Result
+    technique: T1059.001
+    platform: windows
+    needs: PowerShell Script Block Logging (event 4104) enabled and collected
+    tests:
+      - kind: atomic
+        technique: T1059.001
+        guid: fa050f5e-bc75-4230-af73-b6fd7852cd73
+        name: PowerShell Fileless Script Execution
+        run: 'Invoke-AtomicTest T1059.001 -TestGuids fa050f5e-bc75-4230-af73-b6fd7852cd73'
+        expect: alert
+        confirmed: "no"
+        note: >
+          Stores a Base64 string in the registry, decodes it and runs it; the
+          decoded command writes a marker file under the Windows Temp folder.
+          Run the test's clean-up afterwards (add -Cleanup to the same command).
+
+  - rule: sigma/techdetechtives_linux_download_piped_to_shell.yml
+    title: TechDetechtives - Download Piped Directly Into a Shell
+    technique: T1059.004
+    platform: linux
+    needs: process start events with command lines from the Linux endpoint (Elastic Defend)
+    tests:
+      - kind: atomic
+        technique: T1059.004
+        guid: fca246a8-a585-4f28-a2df-6495973976a1
+        name: Detecting pipe-to-shell
+        run: 'Invoke-AtomicTest T1059.004 -TestGuids fca246a8-a585-4f28-a2df-6495973976a1'
+        expect: alert
+        confirmed: "no"
+        note: >
+          Downloads a short script from the Atomic Red Team repository on
+          GitHub and pipes it into bash; the script writes /tmp/art.txt. The
+          endpoint needs internet access. Read the script before running it.
+          Run the test's clean-up afterwards.
+      - kind: atomic
+        technique: T1059.004
+        guid: d0c88567-803d-4dca-99b4-7ce65e7b257c
+        name: Command-Line Interface
+        run: 'Invoke-AtomicTest T1059.004 -TestGuids d0c88567-803d-4dca-99b4-7ce65e7b257c'
+        expect: alert
+        confirmed: "no"
+        note: >
+          The same idea with both curl and wget. Needs internet access.
+
+# Rules for other engines. No atomic test fits; these are single commands run
+# on a monitored lab host whose traffic passes the sensor.
+network_checks:
+  - rule: suricata/techdetechtives.rules
+    sid: 1900001
+    plain: 'nslookup td-test.duckdns.org'
+    expect: alert
+    confirmed: "no"
+    note: The name does not need to exist; the query itself is what the rule sees.
+  - rule: suricata/techdetechtives.rules
+    sid: 1900002
+    plain: 'powershell -Command "Invoke-WebRequest http://example.com -UseBasicParsing"'
+    expect: alert
+    confirmed: "no"
+    note: >
+      Must be plain http (not https) from a host inside the monitored network
+      to an outside address, or the sensor cannot read the request.

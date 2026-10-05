@@ -16,12 +16,17 @@ name: techdetechtives
 services:
   td-jupyter:
     build: .
-    image: techdetechtives/analytics:0.1.0
+    image: techdetechtives/analytics:0.2.0
     container_name: td-jupyter
     env_file:
       - ../config/techdetechtives.env
     ports:
       - "${TD_JUPYTER_BIND:-127.0.0.1}:${TD_JUPYTER_PORT:-8888}:8888"
+    # The container has its own name lookup and does not see this host's
+    # /etc/hosts, so the installer looks the platform's address up on the host
+    # (TD_ES_IP) and hands it over here.
+    extra_hosts:
+      - "${TD_ES_HOST:-techdetechtives-platform.invalid}:${TD_ES_IP:-127.0.0.1}"
     volumes:
       - ./notebooks:/home/hunter/work/notebooks
       - td-data:/home/hunter/work/data
