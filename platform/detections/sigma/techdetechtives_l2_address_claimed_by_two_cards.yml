@@ -1,0 +1,29 @@
+title: TechDetechtives - One Address Claimed by Two Network Cards (ARP Poisoning)
+id: 536d841f-33bd-53d2-bc55-19c78db3122b
+status: experimental
+description: >
+  Two network cards (MAC addresses) are claiming the same IP address in turn.
+  This is what ARP poisoning looks like from the wire: the real owner and the
+  attacker both keep announcing the address, so that traffic for it passes
+  through the attacker's machine. Two machines mistakenly set to the same
+  address look the same.
+author: TechDetechtives
+date: 2026-10-05
+tags:
+  - attack.credential-access
+  - attack.collection
+  - attack.t1557.002
+logsource:
+  product: zeek
+  service: notice
+  definition: 'Requirements: the TechDetechtives layer 2 watch must be switched on (sudo platform/apply-overlay.sh layer2 on) and the sensor must receive the ARP traffic of the network segment.'
+detection:
+  selection:
+    event.dataset: 'zeek.notice'
+    notice.note:
+      - 'TechDetechtives::Address_Claimed_By_Two_Cards'
+  condition: selection
+falsepositives:
+  - Two machines configured with the same address
+  - A failover pair that moves an address back and forth without a shared virtual card address
+level: high

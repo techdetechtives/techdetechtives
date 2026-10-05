@@ -17,6 +17,7 @@ change rules here rather than typing them into the console.
 | Ingested logs (process starts, logons, PowerShell script blocks, DNS, anything in Elasticsearch) | Sigma | `platform/detections/sigma/*.yml` | ElastAlert |
 | Packets on the wire | Suricata | `platform/detections/suricata/*.rules` | Suricata |
 | Files carved out of network traffic | YARA | `platform/detections/yara/*.yar` | Strelka |
+| ARP and network card (MAC) addresses | A Zeek script that writes notices, plus a Sigma rule on `event.dataset: zeek.notice` | `platform/zeek/techdetechtives/` and `platform/detections/sigma/techdetechtives_l2_*.yml` | Zeek, then ElastAlert |
 
 A YARA rule never sees logs, and a Sigma rule never sees a file's contents.
 When an idea could be either (for example "script that decodes Base64 and runs
@@ -34,8 +35,18 @@ with the community rule sets.
   (`attack.t1059.001`), `logsource`, `detection`, `falsepositives`, `level`.
   The level becomes the alert severity: `medium` and above opens a ticket.
 - **Suricata:** `msg` starts with `TECHDETECHTIVES`; SIDs 1900001 to 1900999
-  are reserved for this rule set, so take the next free one; set `rev:1` and
-  raise it on every change.
+  are reserved for this rule set (general rules from 1900001, industrial from
+  1900101, floods from 1900301), so take the next free one in the right block;
+  set `rev:1` and raise it on every change; set `priority` (1 high, 2 medium,
+  3 low), because it decides the alert severity. Write "outside the monitored
+  network" as `!$HOME_NET`: the platform sets `$EXTERNAL_NET` to `any`. A rule
+  that counts packets with `threshold` needs one per-packet option (`itype`,
+  `flags`, `dsize`, `ttl`), or the engine checks it once per conversation.
+- **Zeek:** the layer 2 watch is the only custom Zeek script. It is loaded
+  only after `sudo platform/apply-overlay.sh layer2 on`, which first has the
+  platform's Zeek read it. A Zeek script that does not parse stops Zeek from
+  starting, so never copy one into the platform by hand. The platform passes
+  these files through its template step: no `{{`, `{%` or `{#` in them.
 - **YARA:** rule name starts with `TechDetechtives_`; fill in `meta`
   (description, author, date, severity); bound the cost with a `filesize`
   condition.

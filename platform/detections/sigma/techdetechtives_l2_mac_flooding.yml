@@ -1,0 +1,29 @@
+title: TechDetechtives - Many New Network Cards Within a Minute (MAC Flooding)
+id: f520d027-6a74-5c7c-be50-79aaacb329ed
+status: experimental
+description: >
+  A large number of network card (MAC) addresses that were never seen before
+  appeared within one minute. Tools that flood a switch with made-up card
+  addresses do this to fill its address table, after which the switch sends
+  everyone's traffic to every port.
+author: TechDetechtives
+date: 2026-10-05
+tags:
+  - attack.discovery
+  - attack.t1040
+  - attack.impact
+  - attack.t1498
+logsource:
+  product: zeek
+  service: notice
+  definition: 'Requirements: the TechDetechtives layer 2 watch must be switched on (sudo platform/apply-overlay.sh layer2 on) and the sensor must receive the ARP traffic of the network segment.'
+detection:
+  selection:
+    event.dataset: 'zeek.notice'
+    notice.note:
+      - 'TechDetechtives::Many_New_Cards'
+  condition: selection
+falsepositives:
+  - A new network segment added to the traffic mirror
+  - A large group of machines switched on together
+level: high

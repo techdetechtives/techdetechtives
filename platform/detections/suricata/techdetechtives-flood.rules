@@ -1,0 +1,49 @@
+# TechDetechtives flood and denial-of-service Suricata rules.
+# Copyright (c) 2026 TechDetechtives. MIT licence (see LICENSE).
+# SID range reserved for this file: 1900301 - 1900399.
+#
+# These rules count packets. Each fires once per ten seconds while the rate
+# stays above its figure ("type both"), so a flood is a few alerts, not one per
+# packet. "track by_src" counts what one address sends (a single attacker);
+# "track by_dst" counts what one host receives from everyone (a distributed
+# attack, or one with forged source addresses).
+#
+# The figures are starting points for a small or industrial network, not
+# measurements of yours. A vulnerability scan, a backup or a monitoring sweep can
+# cross them. To change one, duplicate the rule in the console (Detections),
+# edit the count, and switch this one off; to silence one known machine, use the
+# rule's Tuning tab. docs/DETECTION-COVERAGE.md lists every figure.
+#
+# The sensor only watches. It reports a flood; it cannot stop one.
+#
+# Layer 2 attacks (ARP poisoning, a changed network card address, MAC flooding)
+# are not here: this engine does not read ARP. They are watched by the Zeek
+# script in platform/zeek/ and reported through the Sigma rules named
+# techdetechtives_l2_*.yml.
+
+# --- ICMP ------------------------------------------------------------------
+alert icmp any any -> $HOME_NET any (msg:"TECHDETECHTIVES Flood - ICMP echo (ping) flood or sweep from one address"; itype:8; threshold: type both, track by_src, count 500, seconds 10; classtype:attempted-dos; priority:2; sid:1900301; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert icmp any any -> $HOME_NET any (msg:"TECHDETECHTIVES Flood - ICMP echo (ping) flood at one host"; itype:8; threshold: type both, track by_dst, count 1000, seconds 10; classtype:attempted-dos; priority:2; sid:1900302; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert icmp any any -> $HOME_NET any (msg:"TECHDETECHTIVES Flood - Oversized pings repeated from one address"; itype:8; dsize:>1000; threshold: type both, track by_src, count 20, seconds 10; classtype:attempted-dos; priority:2; sid:1900303; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert icmp any any -> $HOME_NET any (msg:"TECHDETECHTIVES Flood - ICMP echo replies flooding one host (reflection)"; itype:0; threshold: type both, track by_dst, count 1000, seconds 10; classtype:attempted-dos; priority:2; sid:1900304; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert icmp any any -> 255.255.255.255 any (msg:"TECHDETECHTIVES Flood - Ping sent to the broadcast address"; itype:8; threshold: type limit, track by_src, seconds 300, count 1; classtype:misc-activity; priority:3; sid:1900305; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert icmp any any -> $HOME_NET any (msg:"TECHDETECHTIVES Flood - ICMP destination unreachable flood at one host"; itype:3; threshold: type both, track by_dst, count 1000, seconds 10; classtype:attempted-dos; priority:2; sid:1900306; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert icmpv6 any any -> any any (msg:"TECHDETECHTIVES Flood - ICMPv6 echo (ping) flood at one host"; itype:128; threshold: type both, track by_dst, count 1000, seconds 10; classtype:attempted-dos; priority:2; sid:1900307; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert icmpv6 any any -> any any (msg:"TECHDETECHTIVES Flood - IPv6 router advertisement flood"; itype:134; threshold: type both, track by_dst, count 50, seconds 10; classtype:attempted-dos; priority:2; sid:1900308; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+
+# --- TCP -------------------------------------------------------------------
+alert tcp any any -> $HOME_NET any (msg:"TECHDETECHTIVES Flood - TCP SYN flood or fast port scan from one address"; flags:S,12; threshold: type both, track by_src, count 1000, seconds 10; classtype:attempted-dos; priority:2; sid:1900311; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert tcp any any -> $HOME_NET any (msg:"TECHDETECHTIVES Flood - TCP SYN flood at one host"; flags:S,12; threshold: type both, track by_dst, count 3000, seconds 10; classtype:attempted-dos; priority:2; sid:1900312; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert tcp any any -> $HOME_NET any (msg:"TECHDETECHTIVES Flood - Packet with the same source and destination address (LAND)"; flags:S,12; sameip; threshold: type limit, track by_dst, seconds 60, count 1; classtype:attempted-dos; priority:2; sid:1900313; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert tcp any any -> $HOME_NET [102,502,2404,20000,44818,55553,55555] (msg:"TECHDETECHTIVES Flood - Connection flood at an industrial controller port"; flags:S,12; threshold: type both, track by_dst, count 100, seconds 10; classtype:attempted-dos; priority:1; sid:1900314; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+
+# --- UDP -------------------------------------------------------------------
+# ttl:>0 is true for every packet. It is there so the engine counts packets;
+# without a per-packet option it would check a rule like this once per conversation.
+alert udp any ![443,500,1194,2222,4500,4789,34962:34964,51820] -> $HOME_NET ![443,500,1194,2222,4500,4789,34962:34964,51820] (msg:"TECHDETECHTIVES Flood - UDP flood from one address"; ttl:>0; threshold: type both, track by_src, count 20000, seconds 10; classtype:attempted-dos; priority:2; sid:1900321; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert udp any ![443,500,1194,2222,4500,4789,34962:34964,51820] -> $HOME_NET ![443,500,1194,2222,4500,4789,34962:34964,51820] (msg:"TECHDETECHTIVES Flood - UDP flood at one host"; ttl:>0; threshold: type both, track by_dst, count 30000, seconds 10; classtype:attempted-dos; priority:2; sid:1900322; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert udp any 53 -> $HOME_NET any (msg:"TECHDETECHTIVES Flood - Large DNS answers flooding one host (amplification)"; dsize:>1000; threshold: type both, track by_dst, count 500, seconds 10; classtype:attempted-dos; priority:2; sid:1900323; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert udp any [19,111,123,389,1900,3702,11211] -> $HOME_NET any (msg:"TECHDETECHTIVES Flood - Large replies from reflector services flooding one host (amplification)"; dsize:>400; threshold: type both, track by_dst, count 300, seconds 10; classtype:attempted-dos; priority:2; sid:1900324; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+
+# --- Fragments -------------------------------------------------------------
+alert ip any any -> $HOME_NET any (msg:"TECHDETECHTIVES Flood - Fragmented packets flooding one host"; fragbits:M; threshold: type both, track by_dst, count 2000, seconds 10; classtype:attempted-dos; priority:3; sid:1900325; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)

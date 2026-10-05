@@ -1,0 +1,28 @@
+title: TechDetechtives - Unasked ARP Answers or One Card Claiming Many Addresses
+id: 8da68880-2c21-5452-8336-07ebf0d3987f
+status: experimental
+description: >
+  One network card keeps sending ARP answers that nobody asked for, or claimed
+  ten or more IP addresses within five minutes. ARP poisoning tools work by
+  repeating unasked answers, and tools that intercept a whole network segment
+  claim every address on it.
+author: TechDetechtives
+date: 2026-10-05
+tags:
+  - attack.credential-access
+  - attack.t1557.002
+logsource:
+  product: zeek
+  service: notice
+  definition: 'Requirements: the TechDetechtives layer 2 watch must be switched on (sudo platform/apply-overlay.sh layer2 on) and the sensor must receive the ARP traffic of the network segment.'
+detection:
+  selection:
+    event.dataset: 'zeek.notice'
+    notice.note:
+      - 'TechDetechtives::ARP_Reply_Burst'
+      - 'TechDetechtives::Card_Answers_For_Many_Addresses'
+  condition: selection
+falsepositives:
+  - Load balancers, firewalls and routers that answer for many addresses (add their card to l2_ignore_cards)
+  - A traffic mirror that carries ARP answers but not the questions
+level: medium

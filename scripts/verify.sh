@@ -140,11 +140,10 @@ PY
       fail "community skills differ from skills/MANIFEST.sha256 (run: cd skills && sha256sum -c MANIFEST.sha256)"
     fi
     if python3 -m unittest discover -s "$ROOT/platform/tests" >/dev/null 2>&1; then
-      if command -v yara >/dev/null 2>&1; then
-        pass "platform tests (rule settings; Sigma, Suricata and YARA rules against samples)"
-      else
-        pass "platform tests (rule settings; Sigma and Suricata rules against samples; YARA skipped, yara is not installed)"
-      fi
+      skipped=""
+      command -v yara >/dev/null 2>&1 || skipped="; YARA rules skipped, yara is not installed"
+      command -v zeek >/dev/null 2>&1 || skipped="$skipped; layer 2 script skipped, zeek is not installed"
+      pass "platform tests (rule and Zeek settings; Sigma, Suricata, YARA rules and the layer 2 script against samples$skipped)"
     else
       fail "platform tests (run: python3 -m unittest discover -s platform/tests -v)"
     fi

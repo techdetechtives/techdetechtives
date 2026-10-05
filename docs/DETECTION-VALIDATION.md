@@ -20,6 +20,9 @@ Most tests are from [Atomic Red Team](https://github.com/redcanaryco/atomic-red-
 | Download Piped Directly Into a Shell | T1059.004 | Atomic "Detecting pipe-to-shell" and "Command-Line Interface" | Alert (endpoint needs internet access) |
 | Suricata 1900001, dynamic DNS query | | `nslookup td-test.duckdns.org` | Alert |
 | Suricata 1900002, PowerShell user agent | | `Invoke-WebRequest http://example.com` over plain http | Alert |
+| Industrial (OT) rules | | Commands against simulators, under `ot_network_checks` in the file | Alert |
+| Flood rules | | `hping3` and `ping` aimed at a lab machine for a few seconds, under `flood_network_checks` | Alert; an ordinary `ping` must stay quiet |
+| Layer 2 rules | T1557.002 and others | `arpspoof`, `macof`, `arp-scan` and a changed card address on an isolated lab segment | Alert, after `layer2 on` |
 | YARA `TechDetechtives_Script_Base64_Decode_And_Invoke` | | None yet: needs a file carried over unencrypted traffic past the sensor | |
 
 **None of these has been run on a live platform yet.** The expectations come from reading the rules and the test definitions. Each entry has a `confirmed` field for you to fill in.
@@ -50,6 +53,15 @@ Endpoint protection may block a test. Leave it on; "blocked" is a result worth r
 7. Write the date and platform version into the entry's `confirmed` field and commit it.
 
 Run one test at a time, and only the tests in the file. Running a whole technique or the whole library starts many tests at once, including ones that dump credentials or download tools.
+
+## Network, flood and layer 2 tests
+
+These tests disturb a network on purpose: a flood slows it, ARP poisoning intercepts a machine's traffic, and a flood of made-up card addresses can make a switch misbehave. Run them **only on an isolated lab segment that you own** and that the sensor's mirror covers, for a few seconds or a minute at most, and never against a controller that runs a process or a network other people depend on.
+
+1. Flood rules need nothing but the platform. Layer 2 rules need `sudo platform/apply-overlay.sh layer2 on` first, then ten minutes for Zeek to learn which network cards exist.
+2. Run one command from the file's `flood_network_checks` or layer 2 entries from a lab machine.
+3. Flood alerts arrive within a minute on the Alerts screen, with the rule name starting `TECHDETECHTIVES Flood`. Layer 2 alerts take a few minutes longer, because the Zeek notice is picked up by a Sigma rule that runs on a schedule; the notice itself is in Hunt at once: `event.dataset:zeek.notice AND notice.note:TechDetechtives*`.
+4. If a flood figure is crossed by something ordinary on your network (a backup, a scanner), that is a finding too: note it in the entry and tune the rule (see [DETECTION-COVERAGE.md](DETECTION-COVERAGE.md#floods-and-denial-of-service)).
 
 ## If the alert does not arrive
 

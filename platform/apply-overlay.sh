@@ -7,6 +7,7 @@
 #   - the console's login banner and overview page (local Salt file overrides)
 #   - the local Sigma / Suricata / YARA rule repositories
 #   - the console settings that decide which rules are enabled on import
+#   - a custom Zeek script (the layer 2 watch), only when asked for with "layer2 on"
 # It does not change Security Onion code, its licence notices, its logo or its
 # licence-key features.
 #
@@ -15,6 +16,8 @@
 #   sudo ./apply-overlay.sh revert [--dry-run] [--no-salt]
 #   sudo ./apply-overlay.sh status
 #   sudo ./apply-overlay.sh rules      (the TechDetechtives rules as the console sees them)
+#   sudo ./apply-overlay.sh layer2 on|off|status [--no-salt]
+#                                      (ARP and network card watch; changes the list of scripts Zeek loads)
 
 set -euo pipefail
 
@@ -32,7 +35,12 @@ SO_USER="${TD_SO_USER:-socore}"
 SOC_FILES="$SO_LOCAL/salt/soc/files/soc"
 SOC_SETTINGS="$SO_LOCAL/pillar/soc/soc_soc.sls"          # the console's local settings
 SOC_DEFAULTS="$SO_DEFAULT/salt/soc/defaults.yaml"        # read only
+ZEEK_SETTINGS="$SO_LOCAL/pillar/zeek/soc_zeek.sls"        # Zeek's local settings
+ZEEK_DEFAULTS="$SO_DEFAULT/salt/zeek/defaults.yaml"      # read only
+ZEEK_POLICY="$SO_LOCAL/salt/zeek/policy/custom/techdetechtives"
+ZEEK_LOADED_LOG="${TD_ZEEK_LOADED_LOG:-/nsm/zeek/logs/current/loaded_scripts.log}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ZEEK_SOURCE="$HERE/zeek/techdetechtives"
 BRANDING_FILES=(banner.md motd.md)
 # engine : source folder : file glob : local repo name
 RULE_SETS=(
@@ -42,6 +50,7 @@ RULE_SETS=(
 )
 
 COMMAND=""
+LAYER2_ACTION=""
 DRY_RUN=0
 RUN_SALT=1
 AUTO_ENABLE=1
@@ -57,7 +66,7 @@ log()  { printf '[techdetechtives] %s\n' "$*"; }
 warn() { printf '[techdetechtives] WARNING: %s\n' "$*" >&2; }
 die()  { printf '[techdetechtives] ERROR: %s\n' "$*" >&2; exit 1; }
 
-usage() { sed -n '13,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '14,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 run() {
   # Run a command, or only print it in dry-run mode.
@@ -316,6 +325,146 @@ console_rules() {
   return 0
 }
 
+install_zeek_scripts() {
+  # Copies the layer 2 watch to where the platform keeps custom Zeek scripts.
+  # Only "layer2 on" does this: the platform restarts Zeek whenever that folder
+  # changes, so the plain apply step leaves it alone.
+  local f name
+  [[ -d "$ZEEK_SOURCE" ]] || die "missing $ZEEK_SOURCE"
+  if [[ ! -d "$SO_LOCAL/salt" ]]; then
+    warn "$SO_LOCAL/salt not found; skipping the Zeek script"
+    return 0
+  fi
+  for f in "$ZEEK_SOURCE"/*.zeek; do
+    name="$(basename "$f")"
+    # The platform runs these files through its template step on the way to Zeek.
+    if grep -q -e '{{' -e '{%' -e '{#' "$f"; then
+      die "$name contains a sequence the platform's template step would rewrite"
+    fi
+    if [[ $DRY_RUN -eq 1 ]]; then
+      printf '[dry-run] install %s -> %s\n' "zeek/techdetechtives/$name" "$ZEEK_POLICY/"
+      continue
+    fi
+    install -d -m 0755 "$ZEEK_POLICY"
+    install -m 0644 "$f" "$ZEEK_POLICY/$name"
+  done
+  [[ $DRY_RUN -eq 1 ]] && return 0
+  own "$ZEEK_POLICY" "$ZEEK_POLICY"/*.zeek
+  log "layer 2 watch copied to $ZEEK_POLICY"
+}
+
+remove_zeek_scripts() {
+  [[ -d "$ZEEK_POLICY" ]] || return 0
+  run rm -rf "$ZEEK_POLICY"
+  log "layer 2 watch removed from $ZEEK_POLICY"
+}
+
+zeek_scripts_installed() {
+  local f
+  for f in "$ZEEK_SOURCE"/*.zeek; do
+    cmp -s "$f" "$ZEEK_POLICY/$(basename "$f")" || return 1
+  done
+}
+
+zeek_running() {
+  if [[ -n "${TD_ZEEK_RUNNING:-}" ]]; then [[ "$TD_ZEEK_RUNNING" == "1" ]]; return; fi
+  command -v docker >/dev/null 2>&1 || return 1
+  docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'so-zeek'
+}
+
+zeek_check_script() {
+  # Has the platform's own Zeek read the script without running it. A script
+  # Zeek cannot read would stop Zeek from starting, so nothing is switched on
+  # unless this passes.
+  local f
+  for f in "$ZEEK_SOURCE"/*-watch.zeek; do
+    if [[ -n "${TD_ZEEK_CHECK_CMD:-}" ]]; then
+      $TD_ZEEK_CHECK_CMD "$f" || return 1
+    else
+      docker exec -i so-zeek /opt/zeek/bin/zeek -a - < "$f" || return 1
+    fi
+  done
+}
+
+zeek_load_setting() {
+  # on | off | status: whether the watch is in the list of scripts Zeek loads.
+  local action="$1" out
+  if [[ "$action" == "status" ]]; then
+    [[ -f "$ZEEK_DEFAULTS" ]] || return 1
+    python3 "$HERE/zeek_load_setting.py" status "$ZEEK_SETTINGS" "$ZEEK_DEFAULTS" >/dev/null 2>&1
+    return
+  fi
+  python3 -c 'import yaml' >/dev/null 2>&1 || die "python3 with the yaml module is needed for this"
+  [[ -f "$ZEEK_DEFAULTS" && -d "$(dirname "$ZEEK_SETTINGS")" ]] \
+    || die "Zeek settings not found under $SO_LOCAL and $SO_DEFAULT; nothing was changed"
+  if [[ $DRY_RUN -eq 1 ]]; then
+    printf '[dry-run] layer 2 watch %s in %s\n' "$action" "$ZEEK_SETTINGS"
+    return 0
+  fi
+  out="$(python3 "$HERE/zeek_load_setting.py" "$action" "$ZEEK_SETTINGS" "$ZEEK_DEFAULTS" \
+         --backup-dir "$BACKUP_ROOT/settings" 2>&1)" || die "the list of Zeek scripts was not changed: $out"
+  log "list of Zeek scripts ($action): $out"
+  [[ -f "$ZEEK_SETTINGS" ]] && own "$ZEEK_SETTINGS"
+  return 0
+}
+
+apply_zeek_state() {
+  if [[ $RUN_SALT -eq 0 ]]; then
+    log "skipping Salt (--no-salt); Zeek picks the change up at the platform's next scheduled sync"
+    return 0
+  fi
+  command -v salt-call >/dev/null 2>&1 || { warn "salt-call not found; skipping state apply"; return 0; }
+  log "applying the Zeek state; Zeek restarts and stops recording for a few seconds"
+  run salt-call state.apply zeek queue=True
+}
+
+layer2_status() {
+  # Returns 0 only when the watch is switched on and the running Zeek has loaded it.
+  local ok=0
+  if ! zeek_load_setting status; then
+    log "layer 2 watch: switched off (sudo $0 layer2 on)"
+    return 1
+  fi
+  log "layer 2 watch: switched on"
+  if zeek_scripts_installed; then
+    log "layer 2 watch: script in place"
+  else
+    log "layer 2 watch: script missing or older than this repository (sudo $0 layer2 on)"
+    ok=1
+  fi
+  if [[ -f "$ZEEK_LOADED_LOG" ]] && grep -q 'custom/techdetechtives' "$ZEEK_LOADED_LOG"; then
+    log "layer 2 watch: loaded by the running Zeek"
+  else
+    log "layer 2 watch: not loaded by Zeek yet (it loads at Zeek's next restart; see $ZEEK_LOADED_LOG)"
+    ok=1
+  fi
+  return $ok
+}
+
+cmd_layer2() {
+  preflight
+  case "$LAYER2_ACTION" in
+    on)
+      zeek_running || die "Zeek is not running on this platform (check with: sudo so-status). Get Zeek running first; the watch reads Zeek's view of the network and cannot work without it."
+      log "asking the platform's Zeek to read the script"
+      zeek_check_script || die "Zeek could not read the script, so nothing was switched on. Please report the lines above."
+      install_zeek_scripts
+      zeek_load_setting on
+      apply_zeek_state
+      log "done. Check with: sudo $0 layer2 status"
+      log "The first ten minutes after Zeek starts are spent learning which cards exist."
+      ;;
+    off)
+      zeek_load_setting off
+      remove_zeek_scripts
+      apply_zeek_state
+      log "layer 2 watch switched off"
+      ;;
+    status) layer2_status ;;
+    *) usage >&2; die "layer2 needs on, off or status" ;;
+  esac
+}
+
 apply_salt() {
   if [[ $RUN_SALT -eq 0 ]]; then
     log "skipping Salt (--no-salt); the console picks the pages up on its next scheduled sync"
@@ -358,6 +507,11 @@ cmd_revert() {
   done
   each_rule_set remove_rules
   rule_settings disable
+  if zeek_load_setting status || [[ -d "$ZEEK_POLICY" ]]; then
+    zeek_load_setting off
+    remove_zeek_scripts
+    apply_zeek_state
+  fi
   apply_salt
   log "reverted. The backup was left in place at $backup"
 }
@@ -376,6 +530,8 @@ cmd_status() {
   each_rule_set status_rules || ok=1
   rule_settings status || ok=1
   console_rules || ok=1
+  # Optional part: reported, but its absence is not a failure.
+  if [[ -f "$ZEEK_DEFAULTS" ]]; then layer2_status || true; fi
   return $ok
 }
 
@@ -387,6 +543,7 @@ cmd_rules() {
 while [[ $# -gt 0 ]]; do
   case "$1" in
     apply|revert|status|rules) COMMAND="$1" ;;
+    layer2) COMMAND="layer2"; shift; [[ $# -gt 0 ]] || die "layer2 needs on, off or status"; LAYER2_ACTION="$1" ;;
     --dry-run) DRY_RUN=1 ;;
     --no-salt) RUN_SALT=0 ;;
     --no-auto-enable) AUTO_ENABLE=0 ;;
@@ -411,5 +568,6 @@ case "$COMMAND" in
   revert) cmd_revert ;;
   status) cmd_status ;;
   rules)  cmd_rules ;;
+  layer2) cmd_layer2 ;;
   *) usage >&2; exit 2 ;;
 esac

@@ -75,6 +75,11 @@ Passwords typed into a decoy are left out of what is sent. See `honeypot/README.
 
 Rules live in `platform/detections/` and reach the platform through its local rule repositories. The overlay also adds those repositories to the platform's "enable on import" settings, so new rules arrive switched on. Each Sigma rule is paired in `platform/detections/validation.yml` with a test that should make it fire, mostly Atomic Red Team tests named by id; the tests are run by hand on a lab endpoint. See `docs/DETECTION-VALIDATION.md`.
 
+Two parts of the detection do not fit the "one rule file per engine" pattern:
+
+- **Floods** are Suricata rules that count packets (`techdetechtives-flood.rules`), with figures listed in `docs/DETECTION-COVERAGE.md`.
+- **Layer 2** (ARP poisoning, changed card addresses, MAC flooding) cannot be done in Suricata, which does not read ARP. A Zeek script (`platform/zeek/techdetechtives/l2-watch.zeek`) keeps a table of which network card answers for which address and writes a Zeek notice when it changes in a suspicious way; Sigma rules on `event.dataset: zeek.notice` turn the notices into alerts, and the forwarder turns those into tickets like any other. Only `apply-overlay.sh layer2 on` puts the script into the folder the platform provides for custom Zeek scripts and adds it to the list Zeek loads, after first asking the running Zeek to read it.
+
 ## Analyst skills
 
 `skills/` holds guidance files for an AI assistant working alongside an analyst. They run nowhere on the platform: the assistant reads them on the analyst's own machine. Four describe this platform and its limits; the rest are a reviewed selection from a community library, copied unchanged and checked against a manifest. See `skills/README.md`.

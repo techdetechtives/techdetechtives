@@ -1,4 +1,4 @@
 # TechDetechtives local Suricata rules.
 # SID range reserved for this rule set: 1900001 - 1900999.
 alert dns $HOME_NET any -> any any (msg:"TECHDETECHTIVES Policy - DNS query for dynamic DNS domain (duckdns.org)"; dns.query; content:".duckdns.org"; nocase; endswith; classtype:policy-violation; priority:3; sid:1900001; rev:2; metadata:created_at 2026_10_04, updated_at 2026_10_05;)
-alert http $HOME_NET any -> $EXTERNAL_NET any (msg:"TECHDETECHTIVES Hunting - PowerShell user agent in outbound HTTP request"; flow:established,to_server; http.user_agent; content:"WindowsPowerShell/"; classtype:policy-violation; priority:3; sid:1900002; rev:2; metadata:created_at 2026_10_04, updated_at 2026_10_05;)
+alert http $HOME_NET any -> any any (msg:"TECHDETECHTIVES Hunting - PowerShell user agent in an HTTP request"; flow:established,to_server; http.user_agent; content:"WindowsPowerShell/"; classtype:policy-violation; priority:3; sid:1900002; rev:3; metadata:created_at 2026_10_04, updated_at 2026_10_05;)

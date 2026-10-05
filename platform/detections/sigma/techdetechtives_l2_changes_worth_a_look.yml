@@ -1,0 +1,32 @@
+title: TechDetechtives - Layer 2 Change Worth a Look (New Card, Software-Set Address or ARP Sweep)
+id: f544b4f6-2c5a-5719-99ad-cbebc2ac3250
+status: experimental
+description: >
+  Lower-confidence layer 2 events kept for review. An address answered by a
+  different network card after the earlier one went quiet; a new card whose
+  address was set by software instead of by its maker (virtual machines, phones
+  with private addresses and address-changing tools all do this); or one card
+  sending ARP requests at a high rate (an address sweep or a storm).
+author: TechDetechtives
+date: 2026-10-05
+tags:
+  - attack.discovery
+  - attack.t1018
+  - attack.defense-evasion
+logsource:
+  product: zeek
+  service: notice
+  definition: 'Requirements: the TechDetechtives layer 2 watch must be switched on (sudo platform/apply-overlay.sh layer2 on) and the sensor must receive the ARP traffic of the network segment.'
+detection:
+  selection:
+    event.dataset: 'zeek.notice'
+    notice.note:
+      - 'TechDetechtives::Address_Has_New_Card'
+      - 'TechDetechtives::Software_Set_Card_Address'
+      - 'TechDetechtives::ARP_Request_Flood'
+  condition: selection
+falsepositives:
+  - DHCP giving an address to a new machine
+  - Virtual machines and phones
+  - Routers looking for many addresses while the network is being scanned from elsewhere
+level: low
