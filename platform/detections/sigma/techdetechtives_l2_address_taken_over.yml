@@ -1,0 +1,30 @@
+title: TechDetechtives - Address Taken Over by Another Network Card
+id: 32caff9d-31f5-5c81-bbe3-e5591db7e92d
+status: experimental
+description: >
+  An IP address moved to a different network card (MAC address) while its
+  earlier card had been active within the last half hour. An attacker announcing
+  someone else's address, or a machine that changed its card address, causes
+  this. If the address then goes back to the first card, the higher-severity
+  rule for two cards claiming one address fires.
+author: TechDetechtives
+date: 2026-10-05
+tags:
+  - attack.credential-access
+  - attack.t1557.002
+  - attack.defense-evasion
+logsource:
+  product: zeek
+  service: notice
+  definition: 'Requirements: the TechDetechtives layer 2 watch must be switched on (sudo platform/apply-overlay.sh layer2 on) and the sensor must receive the ARP traffic of the network segment.'
+detection:
+  selection:
+    event.dataset: 'zeek.notice'
+    notice.note:
+      - 'TechDetechtives::Address_Taken_Over'
+  condition: selection
+falsepositives:
+  - A device replaced by another with the same address
+  - Failover between two firewalls or routers
+  - A short DHCP lease handed to another machine
+level: medium

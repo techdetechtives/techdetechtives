@@ -455,6 +455,101 @@ checks:
           controller that runs a process. The exact name of the block type differs
           between python-snap7 versions.
 
+  # Layer 2 rules. They read notices written by the Zeek script in
+  # platform/zeek/ (switch it on with: sudo platform/apply-overlay.sh layer2 on).
+  # The tests below interfere with a network on purpose. Run them only on an
+  # isolated lab segment that the sensor's mirror covers, never on a network
+  # other people depend on. Wait ten minutes after Zeek starts: it spends that
+  # time learning which cards exist.
+  - rule: sigma/techdetechtives_l2_address_claimed_by_two_cards.yml
+    title: TechDetechtives - One Address Claimed by Two Network Cards (ARP Poisoning)
+    technique: T1557.002
+    platform: network
+    needs: the layer 2 watch switched on, and a sensor that receives the lab segment's ARP traffic
+    tests:
+      - kind: manual
+        name: ARP poisoning between a lab victim and the lab gateway
+        plain: 'sudo arpspoof -i <interface> -t <victim IP> <gateway IP>     (dsniff package; stop it with Ctrl-C after a minute)'
+        expect: alert
+        confirmed: "no"
+        note: >
+          Checked here by running the script in Zeek 7.0.11 against a generated
+          capture of this attack (platform/tests/test_l2_watch.py), not on a
+          live platform. The attacker's answers and the gateway's own traffic
+          alternate, which is what this rule reports. The same run also raises
+          the two medium rules below.
+  - rule: sigma/techdetechtives_l2_address_taken_over.yml
+    title: TechDetechtives - Address Taken Over by Another Network Card
+    technique: T1557.002
+    platform: network
+    needs: the layer 2 watch switched on, and a sensor that receives the lab segment's ARP traffic
+    tests:
+      - kind: manual
+        name: A lab machine changes its card address while in use
+        plain: 'sudo ip link set dev <interface> down && sudo ip link set dev <interface> address 00:11:22:33:44:55 && sudo ip link set dev <interface> up && ping -c 3 <gateway IP>'
+        expect: alert
+        confirmed: "no"
+        note: >
+          The machine keeps its IP address and answers for it from a new card
+          address within half an hour of using the old one. Run it from the
+          machine's console, not over the network: the connection drops for a
+          moment. With an address whose second digit is 2, 6, a or e the
+          low-severity rule fires as well.
+      - kind: manual
+        name: Address handed to another machine after a long quiet spell
+        plain: 'Switch a lab machine off for an hour, then give its address to another machine'
+        expect: none
+        confirmed: "no"
+        note: The earlier card was quiet for more than half an hour, so this is reported at low severity by the "worth a look" rule instead.
+  - rule: sigma/techdetechtives_l2_arp_anomaly.yml
+    title: TechDetechtives - Unasked ARP Answers or One Card Claiming Many Addresses
+    technique: T1557.002
+    platform: network
+    needs: the layer 2 watch switched on, and a sensor that receives the lab segment's ARP traffic
+    tests:
+      - kind: manual
+        name: ARP poisoning tool repeating its answers
+        plain: 'sudo arpspoof -i <interface> -t <victim IP> <gateway IP>     (leave it running for a minute)'
+        expect: alert
+        confirmed: "no"
+        note: >
+          The tool repeats its answer about every two seconds; twenty unasked
+          answers from one card within a minute is the figure the script uses.
+  - rule: sigma/techdetechtives_l2_mac_flooding.yml
+    title: TechDetechtives - Many New Network Cards Within a Minute (MAC Flooding)
+    technique: T1498
+    platform: network
+    needs: the layer 2 watch switched on, and a sensor that receives the lab segment's traffic
+    tests:
+      - kind: manual
+        name: Flood of made-up card addresses
+        plain: 'sudo macof -i <interface> -n 2000     (dsniff package)'
+        expect: alert
+        confirmed: "no"
+        note: >
+          This can make a real switch send all traffic to all ports, and can
+          slow or stop it. Use an isolated lab switch or a virtual one.
+  - rule: sigma/techdetechtives_l2_changes_worth_a_look.yml
+    title: TechDetechtives - Layer 2 Change Worth a Look (New Card, Software-Set Address or ARP Sweep)
+    technique: T1018
+    platform: network
+    needs: the layer 2 watch switched on, and a sensor that receives the lab segment's ARP traffic
+    tests:
+      - kind: manual
+        name: ARP sweep of the lab segment
+        plain: 'sudo arp-scan --interface <interface> --localnet --retry 3'
+        expect: alert
+        confirmed: "no"
+        note: >
+          The figure is 300 ARP requests from one card within a minute. A
+          segment with fewer than about a hundred unused addresses does not
+          reach it.
+      - kind: manual
+        name: New machine with a software-set card address
+        plain: 'Start a new virtual machine on the lab segment with the card address 02:11:22:33:44:55'
+        expect: alert
+        confirmed: "no"
+
 # Rules for other engines. No atomic test fits; these are single commands run
 # on a monitored lab host whose traffic passes the sensor.
 network_checks:
@@ -495,3 +590,57 @@ ot_network_checks:
     expect: alert
     confirmed: "no"
     note: Any DNP3 test master can send this function. Use simulators on both ends.
+  - rule: suricata/techdetechtives-ot.rules
+    sid: [1900186, 1900182]
+    plain: 'On a lab machine: nc -l 55553     From another: printf ''AAAA..\\..\\..\\test'' | nc <lab machine IP> 55553'
+    expect: alert
+    confirmed: "no"
+    note: >
+      A listener on a lab machine stands in for a Honeywell Experion controller's
+      engineering port. The connection raises the low-severity "engineering
+      connection" rule; the text with the climbing folder path raises the
+      CVE-2021-38399 pattern rule. Not tried against a real C300 or Control Builder.
+  - rule: suricata/techdetechtives-ot.rules
+    sid: [1900184]
+    plain: 'On a lab machine: nc -l 55555 > /dev/null     From a Windows lab machine: any way of sending a small .dll file to that port'
+    expect: alert
+    confirmed: "no"
+    note: Program code sent to the engineering port, as a control library download would. Planned library downloads from the engineering station look the same; that is the point of the rule.
+
+# Flood rules (platform/detections/suricata/techdetechtives-flood.rules).
+# Floods disturb networks. Aim these only at a lab machine you own, on a lab
+# segment, for a few seconds (stop with Ctrl-C). hping3 and ping need root.
+flood_network_checks:
+  - rule: suricata/techdetechtives-flood.rules
+    sid: [1900301, 1900302]
+    plain: 'sudo hping3 --icmp --flood <lab machine IP>'
+    expect: alert
+    confirmed: "no"
+  - rule: suricata/techdetechtives-flood.rules
+    sid: [1900301, 1900302]
+    plain: 'ping -c 20 <lab machine IP>'
+    expect: none
+    confirmed: "no"
+    note: Ordinary pings are far below the figures.
+  - rule: suricata/techdetechtives-flood.rules
+    sid: [1900303]
+    plain: 'sudo ping -f -s 1400 -c 500 <lab machine IP>'
+    expect: alert
+    confirmed: "no"
+  - rule: suricata/techdetechtives-flood.rules
+    sid: [1900311, 1900312]
+    plain: 'sudo hping3 -S --flood -p 80 <lab machine IP>'
+    expect: alert
+    confirmed: "no"
+    note: A fast port scan (nmap -T5 -p- <lab machine IP>) raises the same two rules, which is why 1900311 says "flood or fast port scan".
+  - rule: suricata/techdetechtives-flood.rules
+    sid: [1900314]
+    plain: 'sudo hping3 -S -i u5000 -c 2000 -p 502 <simulator IP>'
+    expect: alert
+    confirmed: "no"
+    note: Two hundred connection attempts a second at a Modbus port, far below the general figure but well above what a controller normally receives. Simulator only.
+  - rule: suricata/techdetechtives-flood.rules
+    sid: [1900321, 1900322]
+    plain: 'sudo hping3 --udp --flood -p 9999 <lab machine IP>'
+    expect: alert
+    confirmed: "no"

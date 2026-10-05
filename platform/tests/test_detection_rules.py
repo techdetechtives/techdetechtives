@@ -1,7 +1,8 @@
 # TechDetechtives detection rule tests. Copyright (c) 2026 TechDetechtives. MIT licence.
 """Run with:  python3 -m unittest discover -s platform/tests -v
 
-Three things are checked without needing the platform:
+Three things are checked without needing the platform (the Zeek script has its
+own test, test_l2_watch.py):
 
 * Sigma rules: each rule's logic is evaluated here against sample events (the
   command lines its paired test produces, and look-alikes that must not match).
@@ -81,6 +82,10 @@ def win(command_line, image=None, parent=None, original=None):
 
 def linux(command_line, image="/usr/bin/bash"):
     return {"CommandLine": command_line, "Image": image}
+
+
+def notice(name):
+    return {"event.dataset": "zeek.notice", "notice.note": name}
 
 
 # rule file: (events that must match, events that must not)
@@ -171,6 +176,23 @@ SIGMA_CASES = {
          {"event.dataset": "zeek.s7comm", "s7.function.name": "Start Upload"}],
         [{"event.dataset": "zeek.s7comm", "s7.function.name": "Read Variable"},
          {"event.dataset": "zeek.s7comm", "s7.function.name": "Setup Communication"}]),
+    "techdetechtives_l2_address_claimed_by_two_cards.yml": (
+        [notice("TechDetechtives::Address_Claimed_By_Two_Cards")],
+        [notice("TechDetechtives::Address_Taken_Over"), notice("SSL::Invalid_Server_Cert"),
+         {"event.dataset": "zeek.conn", "notice.note": "TechDetechtives::Address_Claimed_By_Two_Cards"}]),
+    "techdetechtives_l2_mac_flooding.yml": (
+        [notice("TechDetechtives::Many_New_Cards")],
+        [notice("TechDetechtives::Software_Set_Card_Address"), notice("Scan::Port_Scan")]),
+    "techdetechtives_l2_address_taken_over.yml": (
+        [notice("TechDetechtives::Address_Taken_Over")],
+        [notice("TechDetechtives::Address_Has_New_Card"), notice("TechDetechtives::Address_Claimed_By_Two_Cards")]),
+    "techdetechtives_l2_arp_anomaly.yml": (
+        [notice("TechDetechtives::ARP_Reply_Burst"), notice("TechDetechtives::Card_Answers_For_Many_Addresses")],
+        [notice("TechDetechtives::ARP_Request_Flood"), notice("TechDetechtives::Many_New_Cards")]),
+    "techdetechtives_l2_changes_worth_a_look.yml": (
+        [notice("TechDetechtives::Address_Has_New_Card"), notice("TechDetechtives::Software_Set_Card_Address"),
+         notice("TechDetechtives::ARP_Request_Flood")],
+        [notice("TechDetechtives::Address_Taken_Over"), notice("CaptureLoss::Too_Much_Loss")]),
 }
 
 
@@ -198,7 +220,16 @@ class SigmaRules(unittest.TestCase):
 class SuricataRules(unittest.TestCase):
     RULES = [(path.name, number, line) for path in sorted((DETECTIONS / "suricata").glob("*.rules"))
              for number, line in enumerate(path.read_text().splitlines(), 1) if line.strip() and not line.startswith("#")]
-    HEADER = re.compile(r"^alert (tcp|udp|dns|http|modbus|dnp3) (\S+) (\S+) -> (\S+) (\S+) \((.*)\)$")
+    HEADER = re.compile(r"^alert (tcp|udp|icmp|icmpv6|ip|dns|http|modbus|dnp3) (\S+) (\S+) -> (\S+) (\S+) \((.*)\)$")
+    # The engine's own patterns for these options (Suricata 7.0.11, src/detect-threshold.c and detect-tcp-flags.c).
+    THRESHOLD = re.compile(r"^\s*(track|type|count|seconds)\s+(limit|both|threshold|by_dst|by_src|by_both|by_rule|\d+)\s*,"
+                           r"\s*(track|type|count|seconds)\s+(limit|both|threshold|by_dst|by_src|by_both|by_rule|\d+)\s*,"
+                           r"\s*(track|type|count|seconds)\s+(limit|both|threshold|by_dst|by_src|by_both|by_rule|\d+)\s*,"
+                           r"\s*(track|type|count|seconds)\s+(limit|both|threshold|by_dst|by_src|by_both|by_rule|\d+)\s*$")
+    FLAGS = re.compile(r"^\s*(?:([\+\*!]))?\s*([SAPRFU120CE\+\*!]+)(?:\s*,\s*([SAPRFU12CE]+))?\s*$")
+    # Options that are looked at for every packet. A rule made only of addresses
+    # and a threshold is checked once per conversation, which cannot count a flood.
+    PER_PACKET = ("itype:", "flags:", "dsize:", "ttl:", "fragbits:")
     CLASSTYPES = {"attempted-dos", "attempted-recon", "attempted-admin", "policy-violation", "misc-activity"}
 
     def test_structure(self):
@@ -228,6 +259,46 @@ class SuricataRules(unittest.TestCase):
                     self.assertRegex(block, r"^([0-9a-fA-F]{2}( |$))+$", f"{where}: bad hex bytes '{block}'")
         self.assertEqual(len(sids), len(set(sids)), "duplicate sid")
 
+    def test_outside_is_not_written_as_external_net(self):
+        # The platform sets EXTERNAL_NET to "any", so it does not mean "outside".
+        for name, number, line in self.RULES:
+            self.assertNotIn("$EXTERNAL_NET", line, f"{name}:{number}: write !$HOME_NET")
+
+    def test_thresholds_and_flags_have_the_engines_syntax(self):
+        for name, number, line in self.RULES:
+            for value in re.findall(r"threshold:([^;]+);", line):
+                match = self.THRESHOLD.match(value)
+                self.assertIsNotNone(match, f"{name}:{number}: threshold '{value}'")
+                self.assertEqual(sorted(match.group(1, 3, 5, 7)), ["count", "seconds", "track", "type"], f"{name}:{number}")
+            for value in re.findall(r"\bflags:([^;]+);", line):
+                self.assertIsNotNone(self.FLAGS.match(value), f"{name}:{number}: flags '{value}'")
+
+    def test_flood_rules_count_packets_at_a_sane_rate(self):
+        flood = [(number, line) for name, number, line in self.RULES if name == "techdetechtives-flood.rules"]
+        self.assertGreaterEqual(len(flood), 15)
+        for number, line in flood:
+            where = f"flood rules line {number}"
+            sid = int(re.search(r"sid:(\d+);", line).group(1))
+            self.assertTrue(1900301 <= sid <= 1900399, where)
+            self.assertIn('msg:"TECHDETECHTIVES Flood - ', line, where)
+            self.assertTrue(any(option in line for option in self.PER_PACKET), f"{where}: needs a per-packet option")
+            fields = dict(re.findall(r"(type|track|count|seconds) (\w+)", re.search(r"threshold:([^;]+);", line).group(1)))
+            if fields["type"] == "limit":
+                continue
+            self.assertEqual(fields["type"], "both", f"{where}: a rate rule alerts once per window")
+            self.assertIn(fields["track"], ("by_src", "by_dst"), where)
+            rate = int(fields["count"]) / int(fields["seconds"])
+            self.assertGreaterEqual(rate, 2, f"{where}: {rate} packets a second is ordinary traffic")
+
+    def test_honeywell_rules_name_the_published_advisories(self):
+        rules = [line for _, _, line in self.RULES if "Honeywell Experion" in line]
+        self.assertEqual(len(rules), 6)
+        for line in rules:
+            self.assertIn("[55553,55555]", line)
+            self.assertIn("reference:url,www.cisa.gov/news-events/ics-advisories/icsa-", line)
+        self.assertEqual(sum("reference:cve,2021-38399" in line for line in rules), 2)
+        self.assertEqual(sum("reference:cve,2021-38397" in line for line in rules), 3)
+
     def test_ot_rules_use_the_protocol_decoders_where_they_exist(self):
         for name, number, line in self.RULES:
             if line.startswith("alert modbus"):
@@ -238,10 +309,10 @@ class SuricataRules(unittest.TestCase):
 
 def _payload_matches(options, payload):
     """Evaluate the byte-position options these rules use against one request:
-    content with offset/depth, content after the previous match (distance:0),
+    content with offset/depth, content after the previous match (distance, within),
     and a one-byte byte_test with a negated bit mask."""
     cursor, pending = 0, None
-    steps = re.findall(r'(content):"([^"]*)"|(offset|depth|distance):(\d+)|(byte_test):([^;]+)', options)
+    steps = re.findall(r'(content):"([^"]*)"|(offset|depth|distance|within):(\d+)|(byte_test):([^;]+)', options)
     parsed = []
     for content, value, modifier, number, test, arguments in steps:
         if content:
@@ -261,7 +332,8 @@ def _payload_matches(options, payload):
             continue
         data = step["data"]
         if "distance" in step:
-            found = payload.find(data, cursor + step["distance"])
+            start = cursor + step["distance"]
+            found = payload.find(data, start, start + step["within"] if "within" in step else len(payload))
         else:
             start = step.get("offset", 0)
             window = payload[start:start + step["depth"]] if "depth" in step else payload[start:]
@@ -306,6 +378,22 @@ class SuricataBytePositions(unittest.TestCase):
         self.assertTrue(_payload_matches(options, self.IEC_RESET))
         self.assertFalse(_payload_matches(options, self.IEC_INTERROGATION))
         self.assertFalse(_payload_matches(options, self.IEC_SUPERVISORY))
+
+    def test_honeywell_content_rules(self):
+        library = b"\x12\x34\x56\x78" + b"MyLib".ljust(128, b"\x00")       # checksum, then the library name
+        windows = library + b"MZ\x90\x00" + b"\x00" * 60 + b"\x0e\x1f\xba\x0e\x00\xb4\x09\xcd!\xb8\x01L\xcd!This program cannot be run in DOS mode.\r\r\n$"
+        elf = library + b"\x7fELF\x01\x02\x01" + b"\x00" * 200 + b"\x00.shstrtab\x00.text\x00.data\x00"
+        climb_back = b"\x12\x34\x56\x78" + b"..\\..\\..\\windows\\x.dll".ljust(128, b"\x00")
+        climb_forward = b"\x12\x34\x56\x78" + b"../../../tmp/x.so".ljust(128, b"\x00")
+        cases = {1900182: ([climb_back], [climb_forward, windows, b"C:\\Experion\\lib\\..\\x"]),
+                 1900183: ([climb_forward], [climb_back, elf, b"/opt/lib/../x"]),
+                 1900184: ([windows], [elf, library + b"MZ only", b"This program cannot be run in DOS mode"]),
+                 1900185: ([elf], [windows, library + b"\x7fELF" + b"\x00" * 40])}
+        for sid, (positives, negatives) in cases.items():
+            for payload in positives:
+                self.assertTrue(_payload_matches(self.options(sid), payload), sid)
+            for payload in negatives:
+                self.assertFalse(_payload_matches(self.options(sid), payload), sid)
 
     def test_function_byte_position_agrees_with_the_request_layout(self):
         # TPKT (4 bytes) + COTP data header (3) + S7 job header (10) puts the function at byte 17.

@@ -16,7 +16,9 @@ check() { # check "name" command...
   if "$@" >/dev/null 2>&1; then printf '  ok    %s\n' "$name"; else printf '  FAIL  %s\n' "$name"; fails=$((fails + 1)); fi
 }
 
-mkdir -p "$WORK"/{local/pillar/soc,local/salt/soc/files/soc,default/salt/soc,rules,backup,bin}
+mkdir -p "$WORK"/{local/pillar/soc,local/pillar/zeek,local/salt/soc/files/soc,default/salt/soc,default/salt/zeek,rules,backup,bin}
+printf 'zeek:\n  enabled: False\n  config:\n    local:\n      load:\n        - misc/loaded-scripts\n        - oui-logging\n      redef:\n        - LogAscii::use_json = T;\n' > "$WORK/default/salt/zeek/defaults.yaml"
+: > "$WORK/local/pillar/zeek/soc_zeek.sls"
 cat > "$WORK/default/salt/soc/defaults.yaml" <<'YAML'
 soc:
   config:
@@ -80,7 +82,30 @@ STUB_JSON="$WORK/mixed.json" overlay rules > "$WORK/rules.out" 2>&1 || true
 check "rules lists switched-off rules" grep -q "disabled  elastalert  A" "$WORK/rules.out"
 check "status fails while a rule is off" bash -c '! STUB_JSON="$1" bash "$0" status' "$OVERLAY" "$WORK/mixed.json"
 
+# The layer 2 watch: copied by apply, loaded only when asked, and only when Zeek can read it.
+zeek_settings="$WORK/local/pillar/zeek/soc_zeek.sls"
+zeek_copy="$WORK/local/salt/zeek/policy/custom/techdetechtives"
+export TD_ZEEK_LOADED_LOG="$WORK/loaded_scripts.log"
+check "apply leaves Zeek alone" bash -c '[[ ! -e "$0" ]] && ! grep -q techdetechtives "$1"' "$zeek_copy" "$zeek_settings"
+check "layer2 status says off" bash -c '! bash "$0" layer2 status' "$OVERLAY"
+check "layer2 on refused while Zeek is down" bash -c '! TD_ZEEK_RUNNING=0 TD_ZEEK_CHECK_CMD=true bash "$0" layer2 on --no-salt' "$OVERLAY"
+check "layer2 on refused when Zeek cannot read the script" bash -c '! TD_ZEEK_RUNNING=1 TD_ZEEK_CHECK_CMD=false bash "$0" layer2 on --no-salt' "$OVERLAY"
+check "a refused layer2 on changes nothing" bash -c '[[ ! -e "$0" ]] && ! grep -q techdetechtives "$1"' "$zeek_copy" "$zeek_settings"
+TD_ZEEK_RUNNING=1 TD_ZEEK_CHECK_CMD=true overlay layer2 on --no-salt > "$WORK/l2on.out" 2>&1
+check "layer2 on copies the script" test -f "$zeek_copy/l2-watch.zeek"
+check "layer2 on adds the script to the list" grep -q "custom/techdetechtives" "$zeek_settings"
+check "layer2 on keeps the default list" bash -c 'grep -q "misc/loaded-scripts" "$0" && grep -q "oui-logging" "$0"' "$zeek_settings"
+check "layer2 status waits for Zeek to load it" bash -c '! bash "$0" layer2 status' "$OVERLAY"
+echo '{"name":"/opt/zeek/share/zeek/policy/custom/techdetechtives/./l2-watch.zeek"}' > "$TD_ZEEK_LOADED_LOG"
+check "layer2 status passes once Zeek loaded it" overlay layer2 status
+overlay layer2 off --no-salt > /dev/null 2>&1
+check "layer2 off restores the default list" bash -c '! grep -q "load" "$0"' "$zeek_settings"
+check "layer2 off removes the script" bash -c '[[ ! -e "$0" ]]' "$zeek_copy"
+TD_ZEEK_RUNNING=1 TD_ZEEK_CHECK_CMD=true overlay layer2 on --no-salt > /dev/null 2>&1
+
 overlay revert --no-salt > "$WORK/revert.out" 2>&1
+check "revert switches the watch off" bash -c '! grep -q techdetechtives "$0"' "$zeek_settings"
+check "revert removes the Zeek script" bash -c '[[ ! -e "$0" ]]' "$zeek_copy"
 check "revert restores the page" grep -q "ORIGINAL PAGE" "$page"
 check "revert restores the settings" bash -c '! grep -q "local-sigma\|local-yara" "$0" && grep -q "keep: me" "$0"' "$settings"
 check "revert removes the rules" bash -c '[[ $(git -C "$0/rules/local-sigma" ls-files | wc -l) -eq 0 ]]' "$WORK"

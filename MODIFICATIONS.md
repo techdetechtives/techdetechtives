@@ -10,10 +10,18 @@ Applied by `platform/apply-overlay.sh` on the manager node. First applied in ver
 | --- | --- | --- |
 | Login banner | `/opt/so/saltstack/local/salt/soc/files/soc/banner.md` | Replaced with the TechDetechtives banner. Previous file backed up. |
 | Console overview page | `/opt/so/saltstack/local/salt/soc/files/soc/motd.md` | Replaced with the TechDetechtives overview, which shows the TechDetechtives emblem (an image loaded from this repository on GitHub, or from an address you choose). Previous file backed up. |
-| Sigma rules | `/nsm/rules/custom-local-repos/local-sigma` | 19 rule files added and committed (16 for endpoint threats, 3 for industrial protocols) |
-| Suricata rules | `/nsm/rules/custom-local-repos/local-suricata` | 2 rule files added and committed: 2 general rules (SIDs 1900001 and 1900002) and 34 industrial-protocol rules (SIDs 1900101 to 1900173) |
+| Sigma rules | `/nsm/rules/custom-local-repos/local-sigma` | 24 rule files added and committed (16 for endpoint threats, 3 for industrial protocols, 5 for layer 2 notices) |
+| Suricata rules | `/nsm/rules/custom-local-repos/local-suricata` | 3 rule files added and committed: 2 general rules (SIDs 1900001 and 1900002), 40 industrial-protocol rules (SIDs 1900101 to 1900186) and 17 flood rules (SIDs 1900301 to 1900325) |
 | YARA rules | `/nsm/rules/custom-local-repos/local-yara` | 3 rule files (12 rules) added and committed |
 | Which rules are switched on at import | `/opt/so/saltstack/local/pillar/soc/soc_soc.sls`, settings `enabledSigmaRules` and `autoEnabledYaraRules` | The local Sigma and YARA rulesets are added to the platform's own lists (the same settings as Administration, Configuration in the console). Other settings in the file are kept; the file is rewritten in the platform's own format and the previous copy is backed up. Since 0.5.0; skipped with `--no-auto-enable`. |
+
+Applied by `platform/apply-overlay.sh layer2 on`, and only then (since 0.8.0):
+
+| What changes | Where on the platform | How |
+| --- | --- | --- |
+| A custom Zeek script | `/opt/so/saltstack/local/salt/zeek/policy/custom/techdetechtives/` (the folder Security Onion provides for custom Zeek scripts) | `l2-watch.zeek` and its loader are copied there, and removed again by `layer2 off` and `revert`. The plain `apply` step does not touch this folder, because the platform restarts Zeek whenever it changes. Written for this project; no upstream code. |
+| The list of scripts Zeek loads | `/opt/so/saltstack/local/pillar/zeek/soc_zeek.sls`, setting `zeek.config.local.load` | The list in effect is written with `custom/techdetechtives` added (the same setting as Administration, Configuration, zeek in the console). A local value replaces Security Onion's whole default list, so later changes to that default do not arrive while the watch is on. `layer2 off` and `revert` take the entry out and remove the local value when nothing else differs from the default. The previous file is backed up. |
+| Zeek | | Restarted by the platform's own Zeek state so that it loads the script. Before any of this, the running Zeek is asked to read the script without running it (`zeek -a`); if it cannot, nothing is changed. |
 
 Applied by `platform/create-readonly-key.sh`:
 
@@ -79,7 +87,7 @@ Added in 0.5.0. `skills/community/` holds documents copied **unchanged** from th
 
 ## Test status
 
-As of 0.7.0.
+As of 0.8.0.
 
 Confirmed on a live system (Security Onion 2.4.211 standalone, with a second VM; 2026-10-04 and 2026-10-05):
 
@@ -90,13 +98,15 @@ Confirmed on a live system (Security Onion 2.4.211 standalone, with a second VM;
 
 Tested with automated checks or stand-ins:
 
-- `platform/apply-overlay.sh` apply, re-apply, status, rules, dry-run, `--no-auto-enable` and revert, against a mock of the platform's folders (`platform/tests/test_overlay.sh`, 19 checks).
+- `platform/apply-overlay.sh` apply, re-apply, status, rules, dry-run, `--no-auto-enable`, revert, and `layer2` on, off and status (including its refusals), against a mock of the platform's folders (`platform/tests/test_overlay.sh`, 33 checks).
+- The helper that edits the list of scripts Zeek loads: 6 unit tests, and `layer2 on`, `status` and `off` run against the real default Zeek settings file of Security Onion 2.4.211 with Zeek 7.0.11 as the checker. The script was also passed through the template step the platform applies to custom Zeek scripts and came out unchanged.
+- The layer 2 watch (`platform/tests/test_l2_watch.py`): the script was run by Zeek 7.0.11, built from source for this purpose, against captures generated for the test: ordinary ARP traffic for 40 minutes (no notices), ARP poisoning, an address replaced while in use and after a quiet spell, a flood of 2,000 made-up card addresses, an ARP sweep, one card claiming a segment, a software-set card address after the learning time, address probes, and the ignore lists. Each scene produced exactly the notices expected, and deliberately broken copies of the script failed the scenes. Skipped where `zeek` is not installed.
 - The rule-settings helper: 8 unit tests, and a run against the real default settings files of Security Onion 2.4.211 and 3.3.0.
 - `scripts/install.sh analytics` configuration handling, platform name lookup and the container entrypoint's token check, with a stand-in for Docker. `docker compose config` accepts the Compose files.
 - `scripts/fetch-upstream.sh` and `skills/sync-skills.sh` against GitHub; a fresh fetch reproduces `skills/MANIFEST.sha256`.
 - `skills/install-skills.sh` install, re-install, skip-existing and remove.
 - `platform/detections/validation.yml`: every test id and name was checked against the Atomic Red Team definitions at the pinned commit.
-- Detection rules (`platform/tests/test_detection_rules.py`): every Sigma rule evaluated against sample events that must and must not match; Suricata rules checked for structure, and the S7 and IEC 104 byte positions against known requests; YARA rules compiled and run against generated sample files with YARA 4.5.2 (that part is skipped where `yara` is not installed).
+- Detection rules (`platform/tests/test_detection_rules.py`): every Sigma rule evaluated against sample events that must and must not match; Suricata rules checked for structure, their threshold and flag options against the patterns in the Suricata 7.0.11 source, that "outside" is never written as `$EXTERNAL_NET` (which is "any" on the platform), that every flood rule counts packets and not conversations, and the S7, IEC 104 and Honeywell byte patterns against sample requests; YARA rules compiled and run against generated sample files with YARA 4.5.2 (that part is skipped where `yara` is not installed).
 - Every Sigma rule was converted with the platform's own conversion command line and pipeline files (Security Onion 2.4.211), using the Sigma library from source, and the resulting queries were read.
 - `td_hunt` sample-data loading, flattening, Spark preparation and process-tree functions.
 - Every notebook code cell, executed on the sample data with pandas. For the Spark SQL cells, an SQLite stand-in ran the same SQL text.
@@ -113,6 +123,8 @@ Not yet tested:
 - The rule-enable setting on a live platform: that the console accepts the rewritten settings file and switches newly imported local rules on.
 - `platform/apply-overlay.sh rules` against a live detection list (its query was written from the platform's index mapping).
 - Any rule firing on a live install. The Suricata rules have not been loaded into Suricata (no copy of it was available to check them), the YARA rules have not been loaded by the platform's file scanner, and none of the tests in `validation.yml` has been run; each entry says `confirmed: "no"`. The field names used by the three industrial Sigma rules come from the platform's ingest settings and the protocol analyzers' source, not from live records.
+- The flood rules and the Honeywell Experion rules, beyond the checks above. Their figures are judgement, not measurement, and the Honeywell rules have never seen real Experion traffic.
+- `layer2 on` on a live platform: the read check through `docker exec so-zeek`, the settings file being accepted, Zeek restarting with the script loaded, and a notice reaching the platform and becoming an alert through its Sigma rule. The Zeek version on Security Onion 2.4.211 may differ from the 7.0.11 the script was tried with; the read check is there for that. Behaviour with several Zeek worker processes is unknown.
 - An alert becoming a DFIR-IRIS ticket end to end (the forwarder is connected, but no alert at medium or above had occurred when it was checked).
 - Building the workbench container image, and running Spark and JupyterLab in it. Package versions in `analytics/requirements.txt` are ranges that have not been resolved in a build. `td_hunt` has not read from a live Elasticsearch.
 - Greenbone has not been started from this setup. The connector has not read from a real Greenbone: its protocol handling was written from the published protocol and tested against a stand-in, so field names in real responses may need adjusting. Its container image has not been built, and findings have not been written to a real platform data stream.

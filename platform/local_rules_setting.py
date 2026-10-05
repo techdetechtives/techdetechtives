@@ -158,7 +158,7 @@ def disable(local, defaults):
 def save(path, data, backup_dir):
     if backup_dir and os.path.exists(path):
         os.makedirs(backup_dir, exist_ok=True)
-        shutil.copy2(path, os.path.join(backup_dir, "soc_soc.sls." + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())))
+        shutil.copy2(path, os.path.join(backup_dir, os.path.basename(path) + "." + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())))
     existed = os.path.exists(path)
     temporary = path + ".td-new"
     with open(temporary, "w", encoding="utf-8") as handle:
