@@ -13,12 +13,24 @@ OpenCanary is a *low-interaction* honeypot: it answers enough to look real and r
 
 ## Where to run it
 
-Any Linux machine with Docker and the Compose plugin, on the network you want to watch.
+On a machine of its own, used for nothing else, on the network you want to watch. A decoy is the machine most likely to be attacked, so it should hold nothing of value and sit apart from the platform, the tickets and the scan data.
 
-- **Best:** a small machine of its own (1 CPU core, 1 GB RAM is plenty), with a name that fits in among your servers. A decoy that shares a machine with real services is easier to recognise, and port clashes limit which decoys you can offer.
-- **Also works:** the ticketing machine. The installer refuses any decoy whose port is already in use and tells you which.
+- **Never on the platform.** `scripts/install.sh honeypot` refuses to run on the Security Onion machine. The only honeypot step done there is creating its key (step 1 below).
+- **Not on the ticketing machine either**, unless it is a throwaway lab. It works there, but the decoy then shares a machine with your tickets and vulnerability findings, and port clashes limit which decoys you can offer.
+- **Keep it off the internet.** An internet-facing honeypot is contacted constantly and would flood the ticket queue.
 
-Do not run it on the platform machine, and keep it off the internet: an internet-facing honeypot is contacted constantly and would flood the ticket queue.
+### Preparing the machine
+
+A small virtual machine is enough: 1 CPU core, 2 GB RAM and 20 GB disk, with a current Ubuntu Server or Debian. Give it a fixed address and a name that fits in among your servers (`fileserver-02`, `backup-nas`), because that name is what a visitor sees and what alerts show.
+
+```bash
+sudo apt-get update
+sudo apt-get install -y docker.io docker-compose-v2 git
+sudo usermod -aG docker "$USER" && newgrp docker
+docker compose version          # must print a version
+```
+
+The machine needs internet access once, to build the honeypot image. After that it only needs to reach the platform on port 9200. It must also be able to find the platform by name; if it cannot, add a line such as `172.16.101.150  securityon` to `/etc/hosts` (the installer tells you when this is missing).
 
 ## Install
 
@@ -36,11 +48,23 @@ The key can only add honeypot events. It cannot read anything, so the machine mo
 git clone https://github.com/techdetechtives/techdetechtives.git techdetechtives && cd techdetechtives
 cp config/techdetechtives.env.example config/techdetechtives.env     # skip if the file exists
 # In config/techdetechtives.env set TD_ES_HOST to the platform's name and paste
-# the TD_HONEYPOT_API_KEY line from step 1. Copy the platform's /etc/pki/ca.crt
-# to analytics/certs/so-ca.crt. (On the ticketing machine both are already there.)
+# the TD_HONEYPOT_API_KEY line from step 1. Nothing else in that file is needed here.
+```
+
+**3. On the platform**, send its CA certificate (a public file) to the honeypot machine:
+
+```bash
+sudo scp /etc/pki/ca.crt <user>@<honeypot machine IP>:techdetechtives/analytics/certs/so-ca.crt
+```
+
+**4. On the honeypot machine:**
+
+```bash
 scripts/install.sh honeypot --name fileserver-02 --ip <this machine's IP>
 scripts/verify.sh honeypot
 ```
+
+The settings file on this machine holds only the honeypot's own key. Do not copy `config/techdetechtives.env` from the ticketing machine: it contains the read-only key and the ticketing passwords, which have no business on a decoy.
 
 `--name` is the name shown on alerts. `--ip` is this machine's address, shown as the destination.
 
@@ -61,7 +85,7 @@ scripts/install.sh honeypot --services ftp,http,rdp,mysql,ssh --port ssh=2222
 | `mssql` | 1433 | `mongodb` | 27017 |
 | `mysql` | 3306 | | |
 
-The default set is `ftp,http,telnet,mysql,mssql,rdp,vnc,redis`. The SSH decoy is not in it because port 22 is normally the machine's own SSH; add it with `--port ssh=2222`, or move the real SSH to another port first and give the decoy 22. `--port NAME=PORT` works for any decoy. Re-running the command without options keeps your earlier choices.
+The default set is `ftp,http,telnet,mysql,mssql,rdp,vnc,redis`. The SSH decoy is not in it because port 22 is normally the machine's own SSH. On a dedicated machine the convincing arrangement is to move your own SSH to another port (set `Port 2200` in `/etc/ssh/sshd_config`, restart SSH, and confirm you can sign in on the new port before closing your session) and then give the decoy port 22 with `--services ftp,http,telnet,mysql,mssql,rdp,vnc,redis,ssh`. Otherwise add it on another port with `--port ssh=2222`. `--port NAME=PORT` works for any decoy. Re-running the command without options keeps your earlier choices.
 
 ## What you get
 

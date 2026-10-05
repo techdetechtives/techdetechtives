@@ -20,7 +20,7 @@ installer on the wrong machine is the most common mistake.
 | Machine | Runs | Installed with |
 | --- | --- | --- |
 | Platform (the Security Onion manager) | Collection, storage (Elasticsearch on port 9200), the analyst console, Suricata, Zeek, Strelka, the detection engines | Security Onion's own installer, then `sudo scripts/install.sh platform` |
-| Honeypot machine (optional; the second host or a small machine of its own) | OpenCanary decoy services and the shipper that turns each contact into a platform alert | `scripts/install.sh honeypot` |
+| Honeypot machine (optional; a small machine used for nothing else) | OpenCanary decoy services and the shipper that turns each contact into a platform alert | `scripts/install.sh honeypot` |
 | Second host (any Linux host with Docker and the Compose plugin) | Hunting workbench (Jupyter + Spark, `127.0.0.1:8888`), DFIR-IRIS ticketing (port 8443) with the alert forwarder, Greenbone scanning (port 9443) with the vulnerability dashboard (port 8444) | `scripts/install.sh analytics`, `ticketing`, `vulnerability` |
 
 The repository holds only the additions. Security Onion, DFIR-IRIS and
@@ -107,7 +107,9 @@ person operating it decides what leaves the network and what gets changed.
   deleting a rule: describe the action and the reason, and wait for a yes.
 - **Tickets live in DFIR-IRIS.** Do not create parallel cases elsewhere.
 - **Run each command on its own machine**, and do not install the second
-  host's parts on the platform: it manages its own Docker and firewall.
+  host's parts on the platform: it manages its own Docker and firewall. The
+  installer refuses. The honeypot goes on a machine of its own and gets only
+  its own key; never copy the second host's settings file onto it.
 
 Where a generic skill disagrees with this page about how this platform
 works, follow this page.
