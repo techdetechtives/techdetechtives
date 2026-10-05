@@ -26,6 +26,13 @@
 #        with a decoy into a platform alert.
 #   scripts/install.sh honeypot-down
 #        Stop the honeypot.
+#   scripts/install.sh network [--name HOSTNAME] [--ip ADDRESS] [--port 8445] [--inside NETWORKS] [--zones NAME=NETWORK,...] [--learn-hours 72]
+#        Run on the ticketing machine. Starts the device inventory and traffic
+#        map, built from what the platform's sensor recorded.
+#   scripts/install.sh network --accept
+#        Take everything seen so far as normal (the new baseline).
+#   scripts/install.sh network-down
+#        Stop the network inventory (what it learned is kept).
 #   scripts/install.sh skills [--target DIR] [--only-techdetechtives]
 #        Run where your AI assistant runs. Installs the analyst skills
 #        (see skills/README.md).
@@ -42,7 +49,7 @@ COMPOSE_FILE="$ROOT/analytics/docker-compose.yml"
 log()  { printf '[techdetechtives] %s\n' "$*"; }
 warn() { printf '[techdetechtives] WARNING: %s\n' "$*" >&2; }
 die()  { printf '[techdetechtives] ERROR: %s\n' "$*" >&2; exit 1; }
-usage() { sed -n '5,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '5,41p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 env_value() {
   # Read KEY from the env file without sourcing it.
@@ -267,6 +274,47 @@ cmd_honeypot_down() {
   honeypot_compose down
 }
 
+net_compose() {
+  docker compose -f "$ROOT/network/docker-compose.yml" --env-file "$ENV_FILE" "$@"
+}
+
+cmd_network() {
+  not_on_platform network "the ticketing machine"
+  require_docker
+  if [[ "${1:-}" == "--accept" ]]; then
+    docker ps --format '{{.Names}}' | grep -qx td-netmap \
+      || die "the network inventory is not running (start it with: scripts/install.sh network)"
+    docker exec td-netmap python -m td_net.main --accept || die "the baseline was not changed (see the line above)"
+    return 0
+  fi
+  "$ROOT/network/setup-network.sh" "$@"
+  if [[ -z "$(env_value TD_ES_HOST)" || -z "$(env_value TD_ES_API_KEY)" ]]; then
+    die "TD_ES_HOST and TD_ES_API_KEY are empty in $ENV_FILE. The inventory is built from the platform's records:
+create the read-only key on the manager (platform/create-readonly-key.sh), fill both in, and run this again."
+  fi
+  local cert
+  cert="$(env_value TD_ES_CA_CERT)"
+  if [[ "$cert" == /certs/* && ! -f "$ROOT/analytics/certs/${cert#/certs/}" ]]; then
+    die "CA certificate analytics/certs/${cert#/certs/} is missing. Copy /etc/pki/ca.crt from the manager to that path."
+  fi
+  platform_ip >/dev/null
+  if [[ -z "$(env_value TD_NET_INGEST_API_KEY)" ]]; then
+    warn "TD_NET_INGEST_API_KEY is empty: changes since the baseline will show on the pages but will not become platform alerts or tickets."
+    warn "Create the key on the manager with: sudo platform/create-ingest-key.sh --for network   then add it to $ENV_FILE and re-run."
+  fi
+  log "building and starting the network inventory"
+  # Recreated every time, so that a renewed certificate and changed settings are picked up.
+  net_compose up -d --build --force-recreate
+  log "pages: $(env_value TD_NET_PUBLIC_URL)  (user $(env_value TD_NET_USER), password = TD_NET_PASSWORD in $ENV_FILE)"
+  log "the first pass over the platform's records starts now; check it with: scripts/verify.sh network"
+}
+
+cmd_network_down() {
+  require_docker
+  [[ -f "$ENV_FILE" ]] || die "$ENV_FILE not found; nothing to stop"
+  net_compose down
+}
+
 cmd_vulnerability_down() {
   require_docker
   [[ -f "$ENV_FILE" ]] && vuln_compose down
@@ -286,6 +334,8 @@ case "${1:-}" in
   vulnerability-down) cmd_vulnerability_down ;;
   honeypot)       shift; cmd_honeypot "$@" ;;
   honeypot-down)  cmd_honeypot_down ;;
+  network)        shift; cmd_network "$@" ;;
+  network-down)   cmd_network_down ;;
   skills)         shift; exec "$ROOT/skills/install-skills.sh" "$@" ;;
   -h|--help)      usage ;;
   *)              usage >&2; exit 2 ;;

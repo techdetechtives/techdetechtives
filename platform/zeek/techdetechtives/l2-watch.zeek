@@ -70,8 +70,13 @@ export {
 	option l2_ignore_cards: set[string] = {};
 	option l2_ignore_addresses: set[subnet] = {};
 
-	## Upper bound on what is remembered, so a flood of forged addresses cannot
-	## exhaust memory.
+	## A card counts as known once it has been seen again this long after it
+	## first appeared. Made-up cards are seen once and are forgotten after
+	## half an hour, so a flood does not fill the memory for days.
+	option l2_confirm_after = 2min;
+
+	## Upper bound on each list that is remembered, so a flood of forged
+	## addresses cannot exhaust memory.
 	const l2_max_tracked = 100000 &redef;
 }
 
@@ -84,6 +89,7 @@ type Owner: record {
 
 global owners: table[addr] of Owner &read_expire=7day;
 global known_cards: set[string] &read_expire=7day;
+global fresh_cards: table[string] of time &create_expire=30min;
 global card_addresses: table[string] of set[addr] &create_expire=5min;
 global asked: set[addr, addr] &create_expire=5sec;
 global unasked: table[string] of count &create_expire=1min &default=0;
@@ -122,15 +128,33 @@ function saw_card(card: string)
 		return;
 		}
 
-	local quiet = learning();
-
-	if ( |known_cards| < l2_max_tracked )
-		add known_cards[card];
-
-	if ( quiet )
-		return;
-
 	local now = network_time();
+
+	if ( learning() )
+		{
+		if ( |known_cards| < l2_max_tracked )
+			add known_cards[card];
+		return;
+		}
+
+	if ( card in fresh_cards )
+		{
+		# Seen again a while after the first time: a real card.
+		if ( now - fresh_cards[card] >= l2_confirm_after && |known_cards| < l2_max_tracked )
+			{
+			add known_cards[card];
+			delete fresh_cards[card];
+			}
+		return;
+		}
+
+	# With the list full, a flood is under way and has been reported. Cards
+	# that cannot be remembered are not counted either: a single one would
+	# otherwise be counted again with every packet.
+	if ( |fresh_cards| >= l2_max_tracked )
+		return;
+	fresh_cards[card] = now;
+
 	if ( now - new_card_window > 1min )
 		{
 		new_card_window = now;
@@ -159,9 +183,9 @@ function learn(ip: addr, card: string)
 
 	local now = network_time();
 
-	if ( card !in card_addresses )
+	if ( card !in card_addresses && |card_addresses| < l2_max_tracked )
 		card_addresses[card] = set();
-	if ( ip !in card_addresses[card] && |card_addresses[card]| <= l2_many_addresses )
+	if ( card in card_addresses && ip !in card_addresses[card] && |card_addresses[card]| <= l2_many_addresses )
 		{
 		add card_addresses[card][ip];
 		if ( |card_addresses[card]| == l2_many_addresses )
@@ -173,8 +197,12 @@ function learn(ip: addr, card: string)
 
 	if ( ip !in owners )
 		{
-		if ( |owners| < l2_max_tracked )
-			owners[ip] = Owner($card=card, $last_seen=now);
+		# Filled up by forged addresses: start again rather than stay blind to
+		# every address that comes after. Poisoning is recognised from scratch
+		# within a few of its own packets.
+		if ( |owners| >= l2_max_tracked )
+			clear_table(owners);
+		owners[ip] = Owner($card=card, $last_seen=now);
 		return;
 		}
 
@@ -213,7 +241,7 @@ event arp_request(mac_src: string, mac_dst: string, SPA: addr, SHA: string, TPA:
 	if ( SPA != TPA && |asked| < l2_max_tracked )
 		add asked[SPA, TPA];
 
-	if ( ! usable(SHA) )
+	if ( ! usable(SHA) || ( SHA !in requests && |requests| >= l2_max_tracked ) )
 		return;
 
 	++requests[SHA];
@@ -232,6 +260,8 @@ event arp_reply(mac_src: string, mac_dst: string, SPA: addr, SHA: string, TPA: a
 	# An answer to a question the sensor saw is normal. So is an announcement
 	# (a card telling everyone its own address).
 	if ( SPA == TPA || [TPA, SPA] in asked || ! usable(SHA) )
+		return;
+	if ( SHA !in unasked && |unasked| >= l2_max_tracked )
 		return;
 
 	++unasked[SHA];

@@ -13,3 +13,5 @@ vulnerability/certs/*
 !vulnerability/certs/.gitkeep
 honeypot/opencanary.conf
 honeypot/ports.yaml
+network/certs/*
+!network/certs/.gitkeep

@@ -33,6 +33,11 @@
         |    connector --> dashboard and reports pages (8444)    |
         |              --> findings to the platform (append-only)|
         |              --> DFIR-IRIS tickets for findings        |
+        |                                                        |
+        |  Network inventory                                     |
+        |    reads Zeek's records with the read-only key         |
+        |    --> devices, traffic map, changes pages (8445)      |
+        |    --> changes to the platform as alerts (append-only) |
         +--------------------------------------------------------+
 ```
 
@@ -62,6 +67,15 @@ DFIR-IRIS is installed on the analytics host from its own repository at a pinned
 3. From that database it serves the dashboard and reports pages, appends each finding to the platform with a key that can do nothing else, and opens a DFIR-IRIS ticket for each new finding at or above the configured score.
 
 The connector shares no network port with Greenbone: it mounts Greenbone's socket volume read-write only to speak the management protocol, and runs with all Linux capabilities dropped except the one needed to open that socket. See `vulnerability/README.md`.
+
+## Network inventory flow
+
+1. Zeek on the sensor writes a record for every connection and, for the industrial protocols it decodes, for every operation. These are already in the platform.
+2. Every five minutes the inventory asks the platform for grouped totals (who, to whom, which port and protocol, how much, which operations) for the records stored since its last pass, and adds them to a local SQLite file. It asks by the time the sensor's agent read each record, five minutes behind the clock, so a session that lasted a day is counted when it is finally written and records have time to arrive.
+3. For the first 72 hours after records start arriving, everything is taken as the baseline. After that, a device, an industrial conversation or a control command that was not there before is written down as a change.
+4. Changes are shown on the pages and, with an append-only key, sent to the platform as alerts (`event.module: netmap`, tagged `alert`). The existing forwarder turns medium and high ones into tickets.
+
+It runs beside DFIR-IRIS and never sends anything to the monitored network. See `network/README.md`.
 
 ## Honeypot flow
 

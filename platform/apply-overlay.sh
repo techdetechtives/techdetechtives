@@ -38,7 +38,7 @@ SOC_DEFAULTS="$SO_DEFAULT/salt/soc/defaults.yaml"        # read only
 ZEEK_SETTINGS="$SO_LOCAL/pillar/zeek/soc_zeek.sls"        # Zeek's local settings
 ZEEK_DEFAULTS="$SO_DEFAULT/salt/zeek/defaults.yaml"      # read only
 ZEEK_POLICY="$SO_LOCAL/salt/zeek/policy/custom/techdetechtives"
-ZEEK_LOADED_LOG="${TD_ZEEK_LOADED_LOG:-/nsm/zeek/logs/current/loaded_scripts.log}"
+ZEEK_STARTUP_FILE="${TD_ZEEK_STARTUP_FILE:-/opt/so/conf/zeek/local.zeek}"   # written by the platform from the settings
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ZEEK_SOURCE="$HERE/zeek/techdetechtives"
 BRANDING_FILES=(banner.md motd.md)
@@ -332,8 +332,8 @@ install_zeek_scripts() {
   local f name
   [[ -d "$ZEEK_SOURCE" ]] || die "missing $ZEEK_SOURCE"
   if [[ ! -d "$SO_LOCAL/salt" ]]; then
-    warn "$SO_LOCAL/salt not found; skipping the Zeek script"
-    return 0
+    warn "$SO_LOCAL/salt not found; the Zeek script was not copied"
+    return 1
   fi
   for f in "$ZEEK_SOURCE"/*.zeek; do
     name="$(basename "$f")"
@@ -351,6 +351,7 @@ install_zeek_scripts() {
   [[ $DRY_RUN -eq 1 ]] && return 0
   own "$ZEEK_POLICY" "$ZEEK_POLICY"/*.zeek
   log "layer 2 watch copied to $ZEEK_POLICY"
+  return 0
 }
 
 remove_zeek_scripts() {
@@ -367,9 +368,29 @@ zeek_scripts_installed() {
 }
 
 zeek_running() {
+  # The Zeek container is up and a Zeek process (not only its supervisor) is in it.
+  if [[ -n "${TD_ZEEK_RUNNING_CMD:-}" ]]; then $TD_ZEEK_RUNNING_CMD; return; fi      # for the tests
   if [[ -n "${TD_ZEEK_RUNNING:-}" ]]; then [[ "$TD_ZEEK_RUNNING" == "1" ]]; return; fi
   command -v docker >/dev/null 2>&1 || return 1
-  docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'so-zeek'
+  docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'so-zeek' || return 1
+  docker top so-zeek 2>/dev/null | grep -q 'bin/zeek -'
+}
+
+zeek_wait_running() {
+  local tries="${TD_ZEEK_WAIT_TRIES:-36}" i
+  for ((i = 0; i < tries; i++)); do
+    zeek_running && return 0
+    sleep "${TD_ZEEK_WAIT_SECONDS:-5}"
+  done
+  return 1
+}
+
+zeek_started_at() {
+  # When the Zeek container last started, in seconds since 1970. Empty when unknown.
+  if [[ -n "${TD_ZEEK_STARTED_AT:-}" ]]; then printf '%s\n' "$TD_ZEEK_STARTED_AT"; return 0; fi
+  local started
+  started="$(docker inspect -f '{{.State.StartedAt}}' so-zeek 2>/dev/null)" || return 0
+  date -d "$started" +%s 2>/dev/null || true
 }
 
 zeek_check_script() {
@@ -388,21 +409,30 @@ zeek_check_script() {
 
 zeek_load_setting() {
   # on | off | status: whether the watch is in the list of scripts Zeek loads.
+  # Returns 1, changing nothing, when the setting cannot be read or written.
   local action="$1" out
   if [[ "$action" == "status" ]]; then
     [[ -f "$ZEEK_DEFAULTS" ]] || return 1
     python3 "$HERE/zeek_load_setting.py" status "$ZEEK_SETTINGS" "$ZEEK_DEFAULTS" >/dev/null 2>&1
     return
   fi
-  python3 -c 'import yaml' >/dev/null 2>&1 || die "python3 with the yaml module is needed for this"
-  [[ -f "$ZEEK_DEFAULTS" && -d "$(dirname "$ZEEK_SETTINGS")" ]] \
-    || die "Zeek settings not found under $SO_LOCAL and $SO_DEFAULT; nothing was changed"
+  if ! python3 -c 'import yaml' >/dev/null 2>&1; then
+    warn "python3 with the yaml module is needed for this"
+    return 1
+  fi
+  if [[ ! -f "$ZEEK_DEFAULTS" || ! -d "$(dirname "$ZEEK_SETTINGS")" ]]; then
+    warn "Zeek settings not found under $SO_LOCAL and $SO_DEFAULT"
+    return 1
+  fi
   if [[ $DRY_RUN -eq 1 ]]; then
     printf '[dry-run] layer 2 watch %s in %s\n' "$action" "$ZEEK_SETTINGS"
     return 0
   fi
-  out="$(python3 "$HERE/zeek_load_setting.py" "$action" "$ZEEK_SETTINGS" "$ZEEK_DEFAULTS" \
-         --backup-dir "$BACKUP_ROOT/settings" 2>&1)" || die "the list of Zeek scripts was not changed: $out"
+  if ! out="$(python3 "$HERE/zeek_load_setting.py" "$action" "$ZEEK_SETTINGS" "$ZEEK_DEFAULTS" \
+              --backup-dir "$BACKUP_ROOT/settings" --state "$BACKUP_ROOT/settings/zeek_load.state" 2>&1)"; then
+    warn "the list of Zeek scripts was not changed: $out"
+    return 1
+  fi
   log "list of Zeek scripts ($action): $out"
   [[ -f "$ZEEK_SETTINGS" ]] && own "$ZEEK_SETTINGS"
   return 0
@@ -415,12 +445,13 @@ apply_zeek_state() {
   fi
   command -v salt-call >/dev/null 2>&1 || { warn "salt-call not found; skipping state apply"; return 0; }
   log "applying the Zeek state; Zeek restarts and stops recording for a few seconds"
-  run salt-call state.apply zeek queue=True
+  run salt-call --retcode-passthrough state.apply zeek queue=True \
+    || warn "the platform reported a problem applying the Zeek state (see the output above)"
 }
 
 layer2_status() {
-  # Returns 0 only when the watch is switched on and the running Zeek has loaded it.
-  local ok=0
+  # Returns 0 only when the watch is switched on and the running Zeek started with it.
+  local ok=0 started changed
   if ! zeek_load_setting status; then
     log "layer 2 watch: switched off (sudo $0 layer2 on)"
     return 1
@@ -432,10 +463,20 @@ layer2_status() {
     log "layer 2 watch: script missing or older than this repository (sudo $0 layer2 on)"
     ok=1
   fi
-  if [[ -f "$ZEEK_LOADED_LOG" ]] && grep -q 'custom/techdetechtives' "$ZEEK_LOADED_LOG"; then
-    log "layer 2 watch: loaded by the running Zeek"
+  if ! grep -q '^@load custom/techdetechtives' "$ZEEK_STARTUP_FILE" 2>/dev/null; then
+    log "layer 2 watch: not in Zeek's start-up file yet ($ZEEK_STARTUP_FILE); the platform writes it at its next sync"
+    return 1
+  fi
+  if ! zeek_running; then
+    log "layer 2 watch: Zeek is not running (sudo so-status)"
+    return 1
+  fi
+  started="$(zeek_started_at)"
+  changed="$(stat -c %Y "$ZEEK_STARTUP_FILE" 2>/dev/null || true)"
+  if [[ -n "$started" && -n "$changed" && "$started" -ge "$changed" ]]; then
+    log "layer 2 watch: loaded (Zeek started after its start-up file was written)"
   else
-    log "layer 2 watch: not loaded by Zeek yet (it loads at Zeek's next restart; see $ZEEK_LOADED_LOG)"
+    log "layer 2 watch: Zeek has not restarted since it was switched on; it loads the watch at its next restart"
     ok=1
   fi
   return $ok
@@ -445,17 +486,31 @@ cmd_layer2() {
   preflight
   case "$LAYER2_ACTION" in
     on)
-      zeek_running || die "Zeek is not running on this platform (check with: sudo so-status). Get Zeek running first; the watch reads Zeek's view of the network and cannot work without it."
+      zeek_running || die "Zeek is not running on this machine (check with: sudo so-status). Get Zeek running first; the watch reads Zeek's view of the network and cannot work without it. On a platform spread over several machines, where Zeek runs on separate sensors, this command is not supported yet."
       log "asking the platform's Zeek to read the script"
       zeek_check_script || die "Zeek could not read the script, so nothing was switched on. Please report the lines above."
-      install_zeek_scripts
-      zeek_load_setting on
+      install_zeek_scripts || die "nothing was switched on"
+      if ! zeek_load_setting on; then
+        [[ $DRY_RUN -eq 1 ]] || remove_zeek_scripts
+        die "nothing was switched on"
+      fi
       apply_zeek_state
+      if [[ $RUN_SALT -eq 1 && $DRY_RUN -eq 0 ]] && command -v salt-call >/dev/null 2>&1; then
+        log "waiting for Zeek to come back"
+        if ! zeek_wait_running; then
+          warn "Zeek did not come back within three minutes. Switching the watch off again."
+          zeek_load_setting off || true
+          remove_zeek_scripts
+          apply_zeek_state
+          die "the watch was switched off again and the Zeek settings are as they were. Check Zeek with: sudo so-status   and: sudo docker logs --tail 50 so-zeek"
+        fi
+        log "Zeek is running"
+      fi
       log "done. Check with: sudo $0 layer2 status"
       log "The first ten minutes after Zeek starts are spent learning which cards exist."
       ;;
     off)
-      zeek_load_setting off
+      zeek_load_setting off || die "the watch is still switched on"
       remove_zeek_scripts
       apply_zeek_state
       log "layer 2 watch switched off"
@@ -508,8 +563,8 @@ cmd_revert() {
   each_rule_set remove_rules
   rule_settings disable
   if zeek_load_setting status || [[ -d "$ZEEK_POLICY" ]]; then
-    zeek_load_setting off
-    remove_zeek_scripts
+    zeek_load_setting off || warn "the layer 2 watch is still in the list of Zeek scripts; its script is left in place"
+    zeek_load_setting status || remove_zeek_scripts
     apply_zeek_state
   fi
   apply_salt

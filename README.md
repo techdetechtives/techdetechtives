@@ -15,6 +15,7 @@ TechDetechtives is a **modified deployment built on Security Onion**, combined w
 | Ticketing | `ticketing/` | Opens a DFIR-IRIS ticket for every platform alert; installs DFIR-IRIS on your own host | DFIR-IRIS 2.4.29 (fetched at install, not copied here) | Forwarder: MIT. DFIR-IRIS itself: LGPL-3.0 |
 | Vulnerability scanning | `vulnerability/` | Installs Greenbone (OpenVAS) on your own host; vulnerability dashboard, reports pages, findings into the platform, tickets for findings | Greenbone Community Edition (fetched at install, not copied here) | Connector: MIT. Greenbone itself: AGPL-3.0 and GPL-2.0 |
 | Honeypot | `honeypot/` | A decoy machine: every contact with its fake services becomes a platform alert and a ticket | OpenCanary 0.9.10 (installed into a container at install, not copied here) | Shipper: MIT. OpenCanary itself: BSD 3-Clause |
+| Network inventory | `network/` | Devices, a traffic map, industrial operations and what changed since a learned baseline, built from what the platform's sensor records; sends nothing to the network | Original | MIT |
 | Analyst skills | `skills/` | Guidance files for an AI assistant: 4 written for this platform, 26 selected from a community library | Community cybersecurity skills library (selected documents copied, unchanged) | TechDetechtives skills: MIT. Community skills: Apache-2.0 |
 | Scripts and docs | `scripts/`, `docs/` | Install, verify, fetch upstream | Original | MIT |
 
@@ -106,7 +107,16 @@ scripts/verify.sh honeypot
 
 The honeypot gets its own machine, used for nothing else; the installer refuses to run on the platform. This starts decoy services (a web sign-in page, FTP, Remote Desktop, databases and more) that nothing legitimate should ever touch. Each first contact becomes a platform alert and then a ticket. See [honeypot/README.md](honeypot/README.md) for choosing decoys, testing it, and keeping your vulnerability scanner from setting it off.
 
-### 7. Analyst skills (where your AI assistant runs, optional)
+### 7. Network inventory and traffic map (on the ticketing machine)
+
+```bash
+scripts/install.sh network --name <this machine's name> --ip <this machine's IP>
+scripts/verify.sh network
+```
+
+Reads the platform with the read-only key from step 2 and serves the device list, the traffic map and the list of changes on `https://<name>:8445`. It needs Zeek running on the platform. To turn changes into platform alerts and tickets, create its key on the platform with `sudo platform/create-ingest-key.sh --for network`. See [network/README.md](network/README.md).
+
+### 8. Analyst skills (where your AI assistant runs, optional)
 
 ```bash
 scripts/install.sh skills
@@ -143,7 +153,7 @@ Upgrade the platform with its own upgrade tool (`soup`). The overlay lives in th
 
 ## Status
 
-Version 0.8.0. What has and has not been exercised is listed in [MODIFICATIONS.md](MODIFICATIONS.md#test-status). In short: the overlay, installers, forwarder, connector and notebook logic have automated tests against stand-ins; on a live Security Onion 2.4.211 the console pages, both access keys, DFIR-IRIS and the forwarder's connections were confirmed. Not yet seen on a live system: a rule firing, an alert becoming a ticket, the workbench image and Spark, Greenbone and its connector, the honeypot, the rule-enable setting, and the layer 2 watch.
+Version 0.9.0. What has and has not been exercised is listed in [MODIFICATIONS.md](MODIFICATIONS.md#test-status). In short: the overlay, installers, forwarder, connector and notebook logic have automated tests against stand-ins; on a live Security Onion 2.4.211 the console pages, both access keys, DFIR-IRIS and the forwarder's connections were confirmed. Not yet seen on a live system: a rule firing, an alert becoming a ticket, the workbench image and Spark, Greenbone and its connector, the honeypot, the rule-enable setting, the layer 2 watch, and the network inventory.
 
 ## Licence
 

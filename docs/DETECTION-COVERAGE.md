@@ -58,7 +58,7 @@ The files are in `platform/detections/`. Every Sigma rule is paired with a test 
 
 **About proprietary vendor protocols.** Siemens S7 and Rockwell CIP are decoded because open decoders exist. Honeywell Experion, ABB 800xA, Emerson DeltaV and Yokogawa CENTUM use control-network protocols that are not publicly documented, and no open decoder exists for them. TechDetechtives does not pretend otherwise: those systems are recognised by the maker of their network card and by the open protocols they also speak (Modbus, OPC UA, MMS, BACnet), and their proprietary traffic appears as connections without decoded operations.
 
-**Why routine writes do not alert.** Writing a value to a controller is what an operator station does all day. Which machines are allowed to do it differs per plant, so a fixed rule cannot know. That question needs a baseline of who normally talks to each controller, which is the job of the asset inventory (not built yet).
+**Why routine writes do not alert.** Writing a value to a controller is what an operator station does all day. Which machines are allowed to do it differs per plant, so a fixed rule cannot know. That question needs a baseline of who normally talks to each controller. The network inventory ([network/README.md](../network/README.md)) learns one and reports a station that starts sending control commands, a new industrial conversation, and a new kind of connection to a controller.
 
 ### Honeywell Experion PKS: C300, C200 and ACE controllers
 
@@ -67,7 +67,7 @@ What is published, and what the rules do with it:
 | Advisory | What it covers | What TechDetechtives does |
 | --- | --- | --- |
 | CISA ICSA-21-278-04 (CVE-2021-38395, -38397, -38399; found by Claroty Team82) | Control Builder reaches the controllers on TCP 55553 and 55555. A control library sent there could carry program code that the controller ran without checking it, and a folder path in the request could climb out of its folder. Fixed by signed libraries in later releases. | Rules 1900181 to 1900186: the engineering ports reached from outside the monitored network (high); folder-climbing paths in a request (high); Windows or ELF program code sent to a controller (medium, because a planned library download looks the same); a low-severity note of each address that opens an engineering connection, once a day, so you can see who does |
-| CISA ICSA-23-194-06 (the nine "Crit.IX" flaws found by Armis, among them CVE-2023-25770, -25948, -26597, -24480, -25178 for the C300) | Faults in the Control Data Access (CDA) protocol between Experion servers and controllers: crafted messages that crash a controller, leak its configuration or load changed firmware, with no sign-in | No rule recognises these messages: the protocol has never been published and neither have the attack messages, and a rule built on a guess would be decoration. What applies: rule 1900181 (the attacker has to reach the controller first), the connection-flood rule 1900314, and the daily note of who opens engineering connections |
+| CISA ICSA-23-194-06 (the nine "Crit.IX" flaws found by Armis, among them CVE-2023-25770, -25948, -26597, -24480, -25178 for the C300) | Faults in the Control Data Access (CDA) protocol between Experion servers and controllers: crafted messages that crash a controller, leak its configuration or load changed firmware, with no sign-in | No rule recognises these messages: the protocol has never been published and neither have the attack messages, and a rule built on a guess would be decoration. What applies: rule 1900181 (the attacker has to reach the controller first), the connection-flood rule 1900314, the daily note of who opens engineering connections, and the network inventory's baseline, which reports a machine that starts talking to a controller when it never did before |
 | CISA ICSA-25-205-03 (CVE-2025-2520 to -2523, -3946, -3947) | Further faults in CDA and the engineering protocol, fixed in R520.2 TCU9 HF1 and R530 TCU3 HF1 | As above |
 
 All six rules are untried against real Experion traffic. If the engineering protocol compresses or encrypts what it carries, the two content rules (folder paths, program code) will not see it.
@@ -76,7 +76,7 @@ All six rules are untried against real Experion traffic. If the engineering prot
 
 **Fix the controllers.** Detection is the second line. The first is the release level each advisory names; the advisories also ask that the control network be unreachable from the business network, which rule 1900181 checks continuously.
 
-**OT vulnerabilities.** The rules above detect operations, the Honeywell rules follow three published advisories, and the community Suricata rules cover known exploit attempts against other industrial products. Telling you which of your controllers have known vulnerabilities is a different job. Greenbone can scan for some, but active scanning can crash fragile controllers, so do not point it at a live process network without the plant's agreement. Matching the device models seen in traffic against published advisories, without sending a single packet, is not built yet.
+**OT vulnerabilities.** The rules above detect operations, the Honeywell rules follow three published advisories, and the community Suricata rules cover known exploit attempts against other industrial products. Telling you which of your controllers have known vulnerabilities is a different job. Greenbone can scan for some, but active scanning can crash fragile controllers, so do not point it at a live process network without the plant's agreement. The network inventory lists the models and firmware versions that devices announce in traffic (EtherNet/IP and BACnet only), without sending a single packet. Matching those against published advisories is not built yet.
 
 ## Floods and denial of service
 
@@ -108,7 +108,7 @@ Things to know before trusting them:
 - **The UDP rules skip the ports that are busy by design**: QUIC (443), VPNs (500, 1194, 4500, 51820), VXLAN (4789), EtherNet/IP cyclic data (2222) and PROFINET (34962 to 34964). A flood on one of those ports is not counted.
 - **A slow attack is not a flood.** Something that sends one harmful message, or exhausts a server with a few hundred slow connections, stays under every figure here.
 - **The sensor reports; it does not stop anything.** It sees a copy of the traffic. Under a flood large enough to fill the mirror port or the sensor, it also loses packets, and what it records about everything else gets thinner.
-- **Rate-based detection built on a learned baseline** ("this host normally receives 40 packets a second") is the job of the traffic profile, which is not built yet.
+- **Rate-based detection built on a learned baseline** ("this host normally receives 40 packets a second") is not built. The network inventory learns who talks to whom, not how fast.
 
 ## Layer 2: ARP poisoning, changed card addresses, MAC flooding
 
@@ -133,7 +133,15 @@ sudo platform/apply-overlay.sh layer2 status
 sudo platform/apply-overlay.sh layer2 off
 ```
 
-`layer2 on` refuses to run while Zeek is not running, and first has the platform's own Zeek read the script without running it, so a script that this Zeek version cannot read never reaches the configuration. Zeek stops recording for a few seconds while it restarts. While the watch is on, the platform's list of Zeek scripts is a local copy, so changes Security Onion makes to its default list in a later version do not arrive; `layer2 off` removes the copy again.
+What `layer2 on` does to keep Zeek safe:
+
+- It refuses to run while Zeek is not running.
+- It first has the platform's own Zeek read the script without running it, so a script that this Zeek version cannot read never reaches the configuration.
+- After the change it waits for Zeek to come back. If Zeek is not running again within three minutes, it switches the watch off, puts the settings back and says so.
+
+Zeek stops recording for a few seconds while it restarts. While the watch is on, the platform's list of Zeek scripts is a local copy, so changes Security Onion makes to its default list in a later version do not arrive by themselves: after a platform upgrade, run `layer2 on` again to carry the new list over. `layer2 off` hands the list back to the platform.
+
+`layer2 status` reports the watch as loaded when it is in Zeek's start-up file and Zeek has started since that file was written.
 
 Limits:
 
@@ -143,6 +151,8 @@ Limits:
 - **Failover pairs** that move an address between two real cards (instead of sharing a virtual one) look like a takeover. List their cards in `l2_ignore_cards`.
 - **Memory is lost at each Zeek restart.** The first ten minutes afterwards are spent relearning which cards exist; new cards are not reported in that time.
 - **Several Zeek worker processes on one sensor** each keep their own memory. The script was tried with one process. Whether the platform sends all ARP traffic to the same worker has not been checked.
+- **A platform spread over several machines** (Zeek on separate sensors) is not supported by `layer2 on` yet. It works where the manager and Zeek are the same machine, as in a standalone installation.
+- **Under a flood of forged addresses** the script keeps at most 100,000 entries in each of its lists and starts its address list again when it fills, so it stays useful afterwards; while the flood lasts, single events can be missed. The flood itself is reported.
 - **IPv6 neighbour discovery** (the IPv6 counterpart of ARP) is not watched.
 
 Exceptions and figures are Zeek settings. Add lines like these under Administration, Configuration, zeek, config, local, redef (each on its own line, with the semicolon):

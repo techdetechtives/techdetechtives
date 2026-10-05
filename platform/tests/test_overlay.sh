@@ -82,26 +82,65 @@ STUB_JSON="$WORK/mixed.json" overlay rules > "$WORK/rules.out" 2>&1 || true
 check "rules lists switched-off rules" grep -q "disabled  elastalert  A" "$WORK/rules.out"
 check "status fails while a rule is off" bash -c '! STUB_JSON="$1" bash "$0" status' "$OVERLAY" "$WORK/mixed.json"
 
-# The layer 2 watch: copied by apply, loaded only when asked, and only when Zeek can read it.
+# The layer 2 watch: never part of apply, switched on only when Zeek is up and can read the script.
 zeek_settings="$WORK/local/pillar/zeek/soc_zeek.sls"
 zeek_copy="$WORK/local/salt/zeek/policy/custom/techdetechtives"
-export TD_ZEEK_LOADED_LOG="$WORK/loaded_scripts.log"
+export TD_ZEEK_STARTUP_FILE="$WORK/local.zeek" TD_ZEEK_WAIT_TRIES=2 TD_ZEEK_WAIT_SECONDS=0
+# Stand-in for the platform's state tool: writes Zeek's start-up file from the
+# settings, as the platform does, and can be told that Zeek fails to come back.
+cat > "$WORK/bin/salt-call" <<'STUB'
+#!/bin/bash
+echo "salt-call $*" >> "$SALT_LOG"
+if grep -q "custom/techdetechtives" "$TD_SO_LOCAL/pillar/zeek/soc_zeek.sls" 2>/dev/null; then
+  echo "@load custom/techdetechtives" > "$TD_ZEEK_STARTUP_FILE"
+  [[ -f "$BREAK_ZEEK" ]] && touch "$ZEEK_DOWN"
+else
+  : > "$TD_ZEEK_STARTUP_FILE"
+  rm -f "$ZEEK_DOWN"
+fi
+exit 0
+STUB
+chmod +x "$WORK/bin/salt-call"
+export SALT_LOG="$WORK/salt.log" BREAK_ZEEK="$WORK/break-zeek" ZEEK_DOWN="$WORK/zeek-down"
+export TD_ZEEK_RUNNING_CMD="test ! -f $WORK/zeek-down" TD_ZEEK_CHECK_CMD=true
 check "apply leaves Zeek alone" bash -c '[[ ! -e "$0" ]] && ! grep -q techdetechtives "$1"' "$zeek_copy" "$zeek_settings"
 check "layer2 status says off" bash -c '! bash "$0" layer2 status' "$OVERLAY"
-check "layer2 on refused while Zeek is down" bash -c '! TD_ZEEK_RUNNING=0 TD_ZEEK_CHECK_CMD=true bash "$0" layer2 on --no-salt' "$OVERLAY"
-check "layer2 on refused when Zeek cannot read the script" bash -c '! TD_ZEEK_RUNNING=1 TD_ZEEK_CHECK_CMD=false bash "$0" layer2 on --no-salt' "$OVERLAY"
-check "a refused layer2 on changes nothing" bash -c '[[ ! -e "$0" ]] && ! grep -q techdetechtives "$1"' "$zeek_copy" "$zeek_settings"
-TD_ZEEK_RUNNING=1 TD_ZEEK_CHECK_CMD=true overlay layer2 on --no-salt > "$WORK/l2on.out" 2>&1
+check "layer2 on refused while Zeek is down" bash -c '! TD_ZEEK_RUNNING_CMD=false bash "$0" layer2 on' "$OVERLAY"
+check "layer2 on refused when Zeek cannot read the script" bash -c '! TD_ZEEK_CHECK_CMD=false bash "$0" layer2 on' "$OVERLAY"
+check "a refused layer2 on changes nothing" bash -c '[[ ! -e "$0" ]] && ! grep -q techdetechtives "$1" && [[ ! -e "$2" ]]' "$zeek_copy" "$zeek_settings" "$SALT_LOG"
+check "layer2 on --dry-run changes nothing" bash -c 'bash "$0" layer2 on --dry-run >/dev/null && [[ ! -e "$1" ]] && ! grep -q techdetechtives "$2"' "$OVERLAY" "$zeek_copy" "$zeek_settings"
+
+# Settings that cannot be read: the script must not be left behind.
+printf 'zeek: [broken\n' > "$zeek_settings"
+check "layer2 on stops at unreadable settings" bash -c '! bash "$0" layer2 on' "$OVERLAY"
+check "and leaves no script behind" bash -c '[[ ! -e "$0" ]]' "$zeek_copy"
+: > "$zeek_settings"
+
+# Zeek does not come back with the watch loaded: everything is put back.
+touch "$BREAK_ZEEK"
+overlay layer2 on > "$WORK/l2broken.out" 2>&1 || true
+check "a Zeek that does not come back is noticed" grep -q "did not come back" "$WORK/l2broken.out"
+check "the watch is switched off again" bash -c '! grep -q techdetechtives "$0" && [[ ! -e "$1" ]]' "$zeek_settings" "$zeek_copy"
+check "and the Zeek state was applied again" bash -c '[[ $(grep -c "state.apply zeek" "$0") -eq 2 ]] && [[ ! -f "$1" ]]' "$SALT_LOG" "$ZEEK_DOWN"
+rm -f "$BREAK_ZEEK"
+
+overlay layer2 on --no-salt > "$WORK/l2on.out" 2>&1
 check "layer2 on copies the script" test -f "$zeek_copy/l2-watch.zeek"
 check "layer2 on adds the script to the list" grep -q "custom/techdetechtives" "$zeek_settings"
 check "layer2 on keeps the default list" bash -c 'grep -q "misc/loaded-scripts" "$0" && grep -q "oui-logging" "$0"' "$zeek_settings"
-check "layer2 status waits for Zeek to load it" bash -c '! bash "$0" layer2 status' "$OVERLAY"
-echo '{"name":"/opt/zeek/share/zeek/policy/custom/techdetechtives/./l2-watch.zeek"}' > "$TD_ZEEK_LOADED_LOG"
-check "layer2 status passes once Zeek loaded it" overlay layer2 status
+check "status waits for the platform to write the start-up file" bash -c '! bash "$0" layer2 status' "$OVERLAY"
+echo "@load custom/techdetechtives" > "$TD_ZEEK_STARTUP_FILE"
+check "status waits for Zeek to restart" bash -c '! TD_ZEEK_STARTED_AT=1000 bash "$0" layer2 status' "$OVERLAY"
+check "status passes once Zeek started after the change" bash -c 'TD_ZEEK_STARTED_AT=$(( $(date +%s) + 60 )) bash "$0" layer2 status' "$OVERLAY"
+check "status fails when Zeek has stopped" bash -c '! TD_ZEEK_RUNNING_CMD=false TD_ZEEK_STARTED_AT=$(( $(date +%s) + 60 )) bash "$0" layer2 status' "$OVERLAY"
+# A platform upgrade changes the default list while the watch is on: "off" must still hand the list back to the platform.
+sed -i 's/        - oui-logging/        - oui-logging\n        - added-by-upgrade/' "$WORK/default/salt/zeek/defaults.yaml"
 overlay layer2 off --no-salt > /dev/null 2>&1
-check "layer2 off restores the default list" bash -c '! grep -q "load" "$0"' "$zeek_settings"
+check "layer2 off hands the list back to the platform" bash -c '! grep -q "load" "$0"' "$zeek_settings"
 check "layer2 off removes the script" bash -c '[[ ! -e "$0" ]]' "$zeek_copy"
-TD_ZEEK_RUNNING=1 TD_ZEEK_CHECK_CMD=true overlay layer2 on --no-salt > /dev/null 2>&1
+overlay layer2 on > "$WORK/l2on2.out" 2>&1
+check "layer2 on with the platform's tool finishes and Zeek is running" grep -q "Zeek is running" "$WORK/l2on2.out"
+check "the upgraded default list is carried" grep -q "added-by-upgrade" "$zeek_settings"
 
 overlay revert --no-salt > "$WORK/revert.out" 2>&1
 check "revert switches the watch off" bash -c '! grep -q techdetechtives "$0"' "$zeek_settings"
