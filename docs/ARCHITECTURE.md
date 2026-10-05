@@ -63,6 +63,14 @@ DFIR-IRIS is installed on the analytics host from its own repository at a pinned
 
 The connector shares no network port with Greenbone: it mounts Greenbone's socket volume read-write only to speak the management protocol, and runs with all Linux capabilities dropped except the one needed to open that socket. See `vulnerability/README.md`.
 
+## Honeypot flow
+
+1. OpenCanary runs in a container on a machine of your choice and pretends to offer services. It writes one line per contact to a log file on a Docker volume.
+2. The shipper, a second container, reads new lines every ten seconds and appends each contact to the platform with a key that can do nothing else. The first contact from an address to a decoy is tagged as an alert; repeats within 30 minutes are stored as plain events.
+3. The alert appears on the platform's Alerts page, and the ticket forwarder opens a DFIR-IRIS ticket for it like any other alert.
+
+Passwords typed into a decoy are left out of what is sent. See `honeypot/README.md`.
+
 ## Detections and their tests
 
 Rules live in `platform/detections/` and reach the platform through its local rule repositories. The overlay also adds those repositories to the platform's "enable on import" settings, so new rules arrive switched on. Each Sigma rule is paired in `platform/detections/validation.yml` with a test that should make it fire, mostly Atomic Red Team tests named by id; the tests are run by hand on a lab endpoint. See `docs/DETECTION-VALIDATION.md`.

@@ -20,6 +20,12 @@
 #        starts the connector with the vulnerability dashboard and reports pages.
 #   scripts/install.sh vulnerability-down
 #        Stop the connector and Greenbone (scan data is kept).
+#   scripts/install.sh honeypot [--name NODE] [--ip ADDRESS] [--services LIST] [--port NAME=PORT]
+#        Run on the machine that should be the decoy (the ticketing machine, or
+#        better a small machine of its own). Starts OpenCanary and the shipper
+#        that turns every contact into a platform alert.
+#   scripts/install.sh honeypot-down
+#        Stop the honeypot.
 #   scripts/install.sh skills [--target DIR] [--only-techdetechtives]
 #        Run where your AI assistant runs. Installs the analyst skills
 #        (see skills/README.md).
@@ -36,7 +42,7 @@ COMPOSE_FILE="$ROOT/analytics/docker-compose.yml"
 log()  { printf '[techdetechtives] %s\n' "$*"; }
 warn() { printf '[techdetechtives] WARNING: %s\n' "$*" >&2; }
 die()  { printf '[techdetechtives] ERROR: %s\n' "$*" >&2; exit 1; }
-usage() { sed -n '5,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '5,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 env_value() {
   # Read KEY from the env file without sourcing it.
@@ -211,6 +217,42 @@ cmd_vulnerability() {
   log "check it with: scripts/verify.sh vulnerability"
 }
 
+honeypot_compose() {
+  docker compose -f "$ROOT/honeypot/docker-compose.yml" -f "$ROOT/honeypot/ports.yaml" --env-file "$ENV_FILE" "$@"
+}
+
+cmd_honeypot() {
+  require_docker
+  "$ROOT/honeypot/setup-honeypot.sh" "$@"
+  log "building and starting the honeypot (the first build downloads about 1 GB)"
+  honeypot_compose up -d --build td-honeypot
+  if [[ -z "$(env_value TD_ES_HOST)" || -z "$(env_value TD_HONEYPOT_API_KEY)" ]]; then
+    warn "The decoys are up, but nothing is sent to the platform yet: TD_ES_HOST or TD_HONEYPOT_API_KEY is empty."
+    warn "On the platform run: sudo platform/create-ingest-key.sh --for honeypot --allow-ip <this machine>"
+    warn "Put the printed line and TD_ES_HOST in $ENV_FILE, copy the platform's CA certificate"
+    warn "to analytics/certs/so-ca.crt, and re-run this command. Contacts are kept until then."
+    return 0
+  fi
+  local cert
+  cert="$(env_value TD_ES_CA_CERT)"
+  if [[ "$cert" == /certs/* && ! -f "$ROOT/analytics/certs/${cert#/certs/}" ]]; then
+    die "CA certificate analytics/certs/${cert#/certs/} is missing. Copy /etc/pki/ca.crt from the manager to that path."
+  fi
+  platform_ip >/dev/null
+  honeypot_compose up -d --build td-honeypot-shipper
+  log "honeypot started. Every contact with a decoy becomes a platform alert; medium and above become tickets."
+  log "check it with: scripts/verify.sh honeypot"
+  local address
+  address="$(env_value TD_HONEYPOT_IP)"
+  log "try it from another machine: honeypot/README.md, \"Try it\" (for example: curl http://${address:-<this machine>}/index.html)"
+}
+
+cmd_honeypot_down() {
+  require_docker
+  [[ -f "$ENV_FILE" && -f "$ROOT/honeypot/ports.yaml" ]] || die "the honeypot is not set up on this machine; nothing to stop"
+  honeypot_compose down
+}
+
 cmd_vulnerability_down() {
   require_docker
   [[ -f "$ENV_FILE" ]] && vuln_compose down
@@ -228,6 +270,8 @@ case "${1:-}" in
   ticketing-down) cmd_ticketing_down ;;
   vulnerability)      shift; cmd_vulnerability "$@" ;;
   vulnerability-down) cmd_vulnerability_down ;;
+  honeypot)       shift; cmd_honeypot "$@" ;;
+  honeypot-down)  cmd_honeypot_down ;;
   skills)         shift; exec "$ROOT/skills/install-skills.sh" "$@" ;;
   -h|--help)      usage ;;
   *)              usage >&2; exit 2 ;;

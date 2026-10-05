@@ -1,8 +1,10 @@
-# Used only by the vulnerability connector image, whose build context is the
-# repository root. Nothing but its two source locations is sent to Docker, so
+# Used by the images whose build context is the repository root (the
+# vulnerability connector and the honeypot shipper). Nothing but their source
+# files is sent to Docker, so
 # secrets, certificates and fetched upstream code never enter the build.
 *
 !ticketing/forwarder/td_forwarder.py
 !vulnerability/connector/td_vuln
 !vulnerability/connector/td_vuln/*.py
+!honeypot/shipper/td_honeypot.py
 **/__pycache__
