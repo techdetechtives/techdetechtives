@@ -140,9 +140,13 @@ PY
       fail "community skills differ from skills/MANIFEST.sha256 (run: cd skills && sha256sum -c MANIFEST.sha256)"
     fi
     if python3 -m unittest discover -s "$ROOT/platform/tests" >/dev/null 2>&1; then
-      pass "rule settings tests"
+      if command -v yara >/dev/null 2>&1; then
+        pass "platform tests (rule settings; Sigma, Suricata and YARA rules against samples)"
+      else
+        pass "platform tests (rule settings; Sigma and Suricata rules against samples; YARA skipped, yara is not installed)"
+      fi
     else
-      fail "rule settings tests (run: python3 -m unittest discover -s platform/tests -v)"
+      fail "platform tests (run: python3 -m unittest discover -s platform/tests -v)"
     fi
     if bash "$ROOT/platform/tests/test_overlay.sh" >/dev/null 2>&1; then
       pass "overlay test against a mock platform"

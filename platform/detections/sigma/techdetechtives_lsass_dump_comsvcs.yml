@@ -1,0 +1,27 @@
+title: TechDetechtives - LSASS Memory Dump Through comsvcs.dll
+id: 3c9f0a09-2512-5d8c-90b8-d6d5457ec723
+status: experimental
+description: >
+  Detects rundll32 calling the MiniDump function of comsvcs.dll, a built-in way
+  to write the memory of a process (in practice LSASS, to steal credentials)
+  to disk without bringing any tool.
+author: TechDetechtives
+date: 2026-10-05
+tags:
+  - attack.credential_access
+  - attack.t1003.001
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_dll:
+    CommandLine|contains: 'comsvcs'
+  selection_function:
+    CommandLine|contains:
+      - 'MiniDump'
+      - '#24'
+      - '#+24'
+  condition: selection_dll and selection_function
+falsepositives:
+  - None expected. Crash-dump tooling does not use this route.
+level: high

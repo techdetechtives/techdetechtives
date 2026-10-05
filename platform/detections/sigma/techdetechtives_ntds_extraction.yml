@@ -1,0 +1,36 @@
+title: TechDetechtives - Active Directory Database Extraction
+id: 4f0f953c-e2b4-58e4-936e-cd888462f34f
+status: experimental
+description: >
+  Detects the usual ways of copying the Active Directory database (ntds.dit),
+  which holds every domain account's password hash: ntdsutil creating install
+  media, or a command line that names ntds.dit together with a shadow copy or
+  a raw copy tool.
+author: TechDetechtives
+date: 2026-10-05
+tags:
+  - attack.credential_access
+  - attack.t1003.003
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_ntdsutil_image:
+    Image|endswith: '\ntdsutil.exe'
+  selection_ntdsutil_action:
+    CommandLine|contains:
+      - 'ifm'
+      - 'ac i ntds'
+      - 'activate instance ntds'
+  selection_file:
+    CommandLine|contains: 'ntds.dit'
+  selection_copy:
+    CommandLine|contains:
+      - 'HarddiskVolumeShadowCopy'
+      - 'esentutl'
+      - ' copy '
+      - 'Copy-Item'
+  condition: (selection_ntdsutil_image and selection_ntdsutil_action) or (selection_file and selection_copy)
+falsepositives:
+  - Domain controller promotion from install media, done by administrators
+level: high

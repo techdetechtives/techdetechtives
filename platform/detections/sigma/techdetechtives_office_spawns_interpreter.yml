@@ -1,0 +1,43 @@
+title: TechDetechtives - Office Application Starting a Script Interpreter
+id: c1e39b02-7ed5-5edf-b6d9-bee721201547
+status: experimental
+description: >
+  Detects Word, Excel, PowerPoint, Outlook, Access or Publisher starting a
+  command or script interpreter or a signed-binary proxy. This is how a
+  malicious document or attachment usually runs its first command.
+author: TechDetechtives
+date: 2026-10-05
+tags:
+  - attack.execution
+  - attack.t1204.002
+  - attack.initial_access
+  - attack.t1566.001
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_parent:
+    ParentImage|endswith:
+      - '\winword.exe'
+      - '\excel.exe'
+      - '\powerpnt.exe'
+      - '\outlook.exe'
+      - '\msaccess.exe'
+      - '\mspub.exe'
+      - '\onenote.exe'
+  selection_child:
+    Image|endswith:
+      - '\cmd.exe'
+      - '\powershell.exe'
+      - '\pwsh.exe'
+      - '\wscript.exe'
+      - '\cscript.exe'
+      - '\mshta.exe'
+      - '\rundll32.exe'
+      - '\regsvr32.exe'
+      - '\certutil.exe'
+      - '\bitsadmin.exe'
+  condition: selection_parent and selection_child
+falsepositives:
+  - Office add-ins and document automation that shell out, which is uncommon and worth listing once
+level: high

@@ -1,0 +1,40 @@
+title: TechDetechtives - mshta or regsvr32 Running Script From a Remote Address
+id: edf49f4d-9845-5c26-82e9-628f9d28cda7
+status: experimental
+description: >
+  Detects mshta.exe given a URL or inline script, and regsvr32.exe loading a
+  scriptlet through scrobj.dll from a URL. Both run attacker script through a
+  signed Windows program.
+author: TechDetechtives
+date: 2026-10-05
+tags:
+  - attack.defense_evasion
+  - attack.t1218.005
+  - attack.t1218.010
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_mshta_image:
+    Image|endswith: '\mshta.exe'
+  selection_mshta_args:
+    CommandLine|contains:
+      - 'http://'
+      - 'https://'
+      - 'javascript:'
+      - 'vbscript:'
+      - 'about:'
+  selection_regsvr32_image:
+    Image|endswith: '\regsvr32.exe'
+  selection_regsvr32_scriptlet:
+    CommandLine|contains: 'scrobj'
+  selection_regsvr32_remote:
+    CommandLine|contains:
+      - '/i:http'
+      - '-i:http'
+      - '/i:ftp'
+      - '/i:\\'
+  condition: (selection_mshta_image and selection_mshta_args) or (selection_regsvr32_image and selection_regsvr32_scriptlet and selection_regsvr32_remote)
+falsepositives:
+  - Very old intranet applications delivered as HTA files from a web server
+level: high

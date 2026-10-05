@@ -1,0 +1,42 @@
+title: TechDetechtives - Scheduled Task Created to Run a Script or a User-Writable File
+id: abaa57be-290e-50cc-92cc-0fcfa7a2c671
+status: experimental
+description: >
+  Detects schtasks.exe creating a task whose action is a script interpreter or
+  a file under a folder any user can write to. Scheduled tasks are a common
+  way to make malware start again after a reboot or logon.
+author: TechDetechtives
+date: 2026-10-05
+tags:
+  - attack.persistence
+  - attack.execution
+  - attack.t1053.005
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_image:
+    Image|endswith: '\schtasks.exe'
+  selection_create:
+    CommandLine|contains: '/create'
+  selection_action:
+    CommandLine|contains:
+      - 'powershell'
+      - 'pwsh'
+      - 'wscript'
+      - 'cscript'
+      - 'mshta'
+      - 'rundll32'
+      - 'regsvr32'
+      - 'cmd /c'
+      - 'cmd.exe /c'
+      - '\AppData\'
+      - '%APPDATA%'
+      - '%TEMP%'
+      - '\Users\Public\'
+      - '\ProgramData\'
+      - '\Windows\Temp\'
+  condition: selection_image and selection_create and selection_action
+falsepositives:
+  - Software updaters and administrator scripts that register their own tasks
+level: medium

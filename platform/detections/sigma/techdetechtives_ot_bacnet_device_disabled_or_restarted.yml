@@ -1,0 +1,27 @@
+title: TechDetechtives - BACnet Device Told to Restart or Stop Communicating
+id: cac5b8b1-85ab-5d52-841d-623346d4ee92
+status: experimental
+description: >
+  Detects the BACnet services ReinitializeDevice and DeviceCommunicationControl.
+  The first restarts a building controller; the second makes it stop answering
+  or stop sending, which hides it from the operators.
+author: TechDetechtives
+date: 2026-10-05
+tags:
+  - attack.ics
+  - attack.t0816
+  - attack.t0814
+logsource:
+  product: zeek
+  service: bacnet
+  definition: 'Requirements: the platform sensor must see the BACnet/IP traffic (UDP 47808). The BACnet analyzer is on by default.'
+detection:
+  selection:
+    event.dataset: 'zeek.bacnet'
+    bacnet.pdu.service:
+      - 'reinitialize_device'
+      - 'device_communication_control'
+  condition: selection
+falsepositives:
+  - Commissioning and maintenance by the building management contractor
+level: high

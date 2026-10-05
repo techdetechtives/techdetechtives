@@ -1,0 +1,62 @@
+# TechDetechtives OT (industrial control) Suricata rules.
+# Copyright (c) 2026 TechDetechtives. MIT licence (see LICENSE).
+# SID range reserved for this file: 1900101 - 1900299.
+#
+# These rules look for operations that are rare and consequential on an
+# industrial network (stopping a controller, restarting an outstation,
+# loading firmware) and for industrial protocols crossing the edge of the
+# monitored network. Routine reads and writes are deliberately not alerted:
+# who is allowed to write to a controller differs per plant, so that needs a
+# baseline of normal conversations, not a fixed rule (docs/DETECTION-COVERAGE.md).
+#
+# Severity on the platform follows the priority option: 1 high, 2 medium, 3 low.
+# Modbus, DNP3 and EtherNet/IP rules use the engine's own protocol decoders,
+# which the platform enables by default. S7 and IEC 104 rules match bytes at
+# fixed positions in the request and are noted as such.
+
+
+# --- Modbus ----------------------------------------------------------------
+alert modbus any any -> any any (msg:"TECHDETECHTIVES OT Modbus - Force Listen Only Mode (device stops answering)"; flow:to_server; modbus: function 8, subfunction 4; classtype:attempted-dos; priority:1; sid:1900101; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert modbus any any -> any any (msg:"TECHDETECHTIVES OT Modbus - Restart Communications Option"; flow:to_server; modbus: function 8, subfunction 1; classtype:attempted-dos; priority:2; sid:1900102; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert modbus any any -> any any (msg:"TECHDETECHTIVES OT Modbus - Read Device Identification (inventory or reconnaissance)"; flow:to_server; modbus: function 43, subfunction 14; threshold: type limit, track by_src, seconds 3600, count 1; classtype:attempted-recon; priority:3; sid:1900103; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert modbus any any -> any any (msg:"TECHDETECHTIVES OT Modbus - Report Server ID (inventory or reconnaissance)"; flow:to_server; modbus: function 17; threshold: type limit, track by_src, seconds 3600, count 1; classtype:attempted-recon; priority:3; sid:1900104; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert modbus any any -> any any (msg:"TECHDETECHTIVES OT Modbus - Schneider Electric UMAS function 90 (programming and engineering access)"; flow:to_server; modbus: function 90; threshold: type limit, track by_src, seconds 3600, count 1; classtype:policy-violation; priority:3; sid:1900105; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert modbus any any -> any any (msg:"TECHDETECHTIVES OT Modbus - Firmware replacement function 125"; flow:to_server; modbus: function 125; classtype:attempted-admin; priority:1; sid:1900106; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert modbus any any -> any any (msg:"TECHDETECHTIVES OT Modbus - Modicon programming function 126"; flow:to_server; modbus: function 126; threshold: type limit, track by_src, seconds 3600, count 1; classtype:attempted-admin; priority:2; sid:1900107; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert modbus any any -> any any (msg:"TECHDETECHTIVES OT Modbus - Concept programming function 40"; flow:to_server; modbus: function 40; threshold: type limit, track by_src, seconds 3600, count 1; classtype:attempted-admin; priority:2; sid:1900108; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert modbus any any -> any any (msg:"TECHDETECHTIVES OT Modbus - Write File Record"; flow:to_server; modbus: function 21; threshold: type limit, track by_src, seconds 3600, count 1; classtype:attempted-admin; priority:2; sid:1900109; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert modbus any any -> any any (msg:"TECHDETECHTIVES OT Modbus - Write sent to the broadcast unit (every device on the line)"; flow:to_server; modbus: unit 0, access write; threshold: type limit, track by_src, seconds 300, count 1; classtype:attempted-dos; priority:2; sid:1900110; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert modbus $EXTERNAL_NET any -> $HOME_NET any (msg:"TECHDETECHTIVES OT Modbus - Write from outside the monitored network"; flow:to_server; modbus: access write; threshold: type limit, track by_src, seconds 300, count 1; classtype:attempted-admin; priority:1; sid:1900111; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+
+# --- DNP3 ------------------------------------------------------------------
+alert dnp3 any any -> any any (msg:"TECHDETECHTIVES OT DNP3 - Cold Restart sent to an outstation"; flow:to_server; dnp3_func:cold_restart; classtype:attempted-dos; priority:1; sid:1900121; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert dnp3 any any -> any any (msg:"TECHDETECHTIVES OT DNP3 - Warm Restart sent to an outstation"; flow:to_server; dnp3_func:warm_restart; classtype:attempted-dos; priority:1; sid:1900122; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert dnp3 any any -> any any (msg:"TECHDETECHTIVES OT DNP3 - Stop Application sent to an outstation"; flow:to_server; dnp3_func:stop_appl; classtype:attempted-dos; priority:1; sid:1900123; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert dnp3 any any -> any any (msg:"TECHDETECHTIVES OT DNP3 - Initialize Data (outstation data reset)"; flow:to_server; dnp3_func:initialize_data; classtype:attempted-dos; priority:2; sid:1900124; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert dnp3 any any -> any any (msg:"TECHDETECHTIVES OT DNP3 - Initialize Application"; flow:to_server; dnp3_func:initialize_appl; classtype:attempted-admin; priority:2; sid:1900125; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert dnp3 any any -> any any (msg:"TECHDETECHTIVES OT DNP3 - Start Application"; flow:to_server; dnp3_func:start_appl; classtype:attempted-admin; priority:2; sid:1900126; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert dnp3 any any -> any any (msg:"TECHDETECHTIVES OT DNP3 - Unsolicited reporting disabled (outstation stops reporting events)"; flow:to_server; dnp3_func:disable_unsolicited; threshold: type limit, track by_src, seconds 3600, count 1; classtype:attempted-dos; priority:2; sid:1900127; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert dnp3 any any -> any any (msg:"TECHDETECHTIVES OT DNP3 - File deleted on an outstation"; flow:to_server; dnp3_func:delete_file; classtype:attempted-admin; priority:1; sid:1900128; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert dnp3 any any -> any any (msg:"TECHDETECHTIVES OT DNP3 - File transfer opened with an outstation"; flow:to_server; dnp3_func:open_file; threshold: type limit, track by_src, seconds 3600, count 1; classtype:attempted-admin; priority:2; sid:1900129; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert dnp3 any any -> any any (msg:"TECHDETECHTIVES OT DNP3 - Configuration activated on an outstation"; flow:to_server; dnp3_func:activate_config; classtype:attempted-admin; priority:2; sid:1900130; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert dnp3 any any -> any any (msg:"TECHDETECHTIVES OT DNP3 - Configuration saved on an outstation"; flow:to_server; dnp3_func:save_config; classtype:attempted-admin; priority:2; sid:1900131; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert dnp3 any any -> any any (msg:"TECHDETECHTIVES OT DNP3 - Outstation reports that it has restarted"; flow:to_client; dnp3_ind:device_restart; threshold: type limit, track by_src, seconds 3600, count 1; classtype:misc-activity; priority:3; sid:1900132; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+
+# --- EtherNet/IP and CIP (Rockwell Automation and others) ------------------
+alert tcp any any -> any 44818 (msg:"TECHDETECHTIVES OT CIP - Reset sent to the Identity object (device restart or return to factory settings)"; flow:established,to_server; cip_service:5,1; classtype:attempted-dos; priority:1; sid:1900141; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert tcp any any -> any 44818 (msg:"TECHDETECHTIVES OT CIP - Stop service"; flow:established,to_server; cip_service:7; threshold: type limit, track by_src, seconds 300, count 1; classtype:attempted-dos; priority:2; sid:1900142; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert tcp any any -> any 44818 (msg:"TECHDETECHTIVES OT CIP - Network settings changed (Set Attribute on the TCP/IP Interface object)"; flow:established,to_server; cip_service:16,245; classtype:attempted-admin; priority:2; sid:1900143; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert udp $EXTERNAL_NET any -> $HOME_NET 44818 (msg:"TECHDETECHTIVES OT EtherNet/IP - List Identity from outside the monitored network"; enip_command:99; threshold: type limit, track by_src, seconds 3600, count 1; classtype:attempted-recon; priority:2; sid:1900144; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+
+# --- Siemens S7 (bytes at fixed positions: TPKT, COTP data, S7 job, function) ----
+alert tcp any any -> any 102 (msg:"TECHDETECHTIVES OT S7 - PLC STOP command"; flow:established,to_server; content:"|03 00|"; depth:2; content:"|02 f0 80 32 01|"; offset:4; depth:5; content:"|29|"; offset:17; depth:1; classtype:attempted-dos; priority:1; sid:1900151; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert tcp any any -> any 102 (msg:"TECHDETECHTIVES OT S7 - PLC start or restart command"; flow:established,to_server; content:"|03 00|"; depth:2; content:"|02 f0 80 32 01|"; offset:4; depth:5; content:"|28|"; offset:17; depth:1; content:"P_PROGRAM"; distance:0; classtype:attempted-admin; priority:2; sid:1900152; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert tcp any any -> any 102 (msg:"TECHDETECHTIVES OT S7 - Program block deleted from a PLC"; flow:established,to_server; content:"|03 00|"; depth:2; content:"|02 f0 80 32 01|"; offset:4; depth:5; content:"|28|"; offset:17; depth:1; content:"_DELE"; distance:0; classtype:attempted-admin; priority:1; sid:1900153; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+
+# --- IEC 60870-5-104 (bytes at fixed positions: start byte, information frame, type) ----
+alert tcp any any -> any 2404 (msg:"TECHDETECHTIVES OT IEC 104 - Reset Process command (C_RP_NA_1)"; flow:established,to_server; content:"|68|"; depth:1; byte_test:1,!&,1,2; content:"|69|"; offset:6; depth:1; classtype:attempted-dos; priority:1; sid:1900161; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+
+# --- Industrial protocols crossing the edge of the monitored network -------
+alert tcp $EXTERNAL_NET any -> $HOME_NET [102,502,789,1217,1911,1962,2404,2455,4840,4911,5007,5094,9600,11740,18245,18246,20000,20547,44818,48898] (msg:"TECHDETECHTIVES OT Boundary - Industrial protocol port reached from outside the monitored network"; flow:established,to_server; threshold: type limit, track by_src, seconds 3600, count 1; classtype:policy-violation; priority:1; sid:1900171; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert udp $EXTERNAL_NET any -> $HOME_NET [1502,2423,3671,5006,5094,9600,20000,34962:34964,44818,47808,48899] (msg:"TECHDETECHTIVES OT Boundary - Industrial protocol (UDP) from outside the monitored network"; threshold: type limit, track by_src, seconds 3600, count 1; classtype:policy-violation; priority:2; sid:1900172; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)
+alert tcp $HOME_NET any -> $EXTERNAL_NET [102,502,2404,20000,44818] (msg:"TECHDETECHTIVES OT Boundary - Industrial protocol leaving the monitored network"; flow:established,to_server; threshold: type limit, track by_src, seconds 3600, count 1; classtype:policy-violation; priority:2; sid:1900173; rev:1; metadata:created_at 2026_10_05, updated_at 2026_10_05;)

@@ -1,0 +1,28 @@
+title: TechDetechtives - BACnet Objects Created, Deleted or Files Written
+id: e8172bac-9deb-5334-b1d1-c110c4e00d12
+status: experimental
+description: >
+  Detects BACnet services that change what a controller contains rather than
+  a set point: creating or deleting objects and writing files (which is how
+  programs and configuration are loaded).
+author: TechDetechtives
+date: 2026-10-05
+tags:
+  - attack.ics
+  - attack.t0843
+  - attack.t0836
+logsource:
+  product: zeek
+  service: bacnet
+  definition: 'Requirements: the platform sensor must see the BACnet/IP traffic (UDP 47808).'
+detection:
+  selection:
+    event.dataset: 'zeek.bacnet'
+    bacnet.pdu.service:
+      - 'create_object'
+      - 'delete_object'
+      - 'atomic_write_file'
+  condition: selection
+falsepositives:
+  - Engineering work on the building management system
+level: medium

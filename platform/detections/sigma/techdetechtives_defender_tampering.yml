@@ -1,0 +1,42 @@
+title: TechDetechtives - Microsoft Defender Protection Switched Off or Excluded
+id: 95b75654-fb80-5df7-81df-f42d52f90bfa
+status: experimental
+description: >
+  Detects a command line that turns off Microsoft Defender protections, adds a
+  scanning exclusion, or stops and disables the Defender service.
+author: TechDetechtives
+date: 2026-10-05
+tags:
+  - attack.t1685
+  - attack.t1562.001
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_disable:
+    CommandLine|contains:
+      - 'DisableRealtimeMonitoring'
+      - 'DisableBehaviorMonitoring'
+      - 'DisableScriptScanning'
+      - 'DisableIOAVProtection'
+      - 'DisableBlockAtFirstSeen'
+  selection_exclusion:
+    CommandLine|contains: 'Add-MpPreference'
+  selection_exclusion_kind:
+    CommandLine|contains:
+      - 'ExclusionPath'
+      - 'ExclusionExtension'
+      - 'ExclusionProcess'
+  selection_service_image:
+    Image|endswith: '\sc.exe'
+  selection_service_name:
+    CommandLine|contains: 'WinDefend'
+  selection_service_action:
+    CommandLine|contains:
+      - ' stop '
+      - 'disabled'
+      - ' delete '
+  condition: selection_disable or (selection_exclusion and selection_exclusion_kind) or (selection_service_image and selection_service_name and selection_service_action)
+falsepositives:
+  - Software installers and management tools that add their own exclusions
+level: high

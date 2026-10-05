@@ -1,0 +1,48 @@
+title: TechDetechtives - Reverse Shell Command Line on Linux
+id: 3eecceed-ac50-5629-b448-277d2d4d94cd
+status: experimental
+description: >
+  Detects command lines that connect a shell to a remote address: bash
+  redirected to /dev/tcp, netcat started with a program to execute, or the
+  common socat and named-pipe forms.
+author: TechDetechtives
+date: 2026-10-05
+tags:
+  - attack.execution
+  - attack.t1059.004
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection_devtcp:
+    CommandLine|contains:
+      - '/dev/tcp/'
+      - '/dev/udp/'
+  selection_netcat_image:
+    Image|endswith:
+      - '/nc'
+      - '/ncat'
+      - '/netcat'
+      - '/nc.traditional'
+      - '/nc.openbsd'
+  selection_netcat_exec:
+    CommandLine|contains:
+      - ' -e '
+      - ' -c '
+  selection_shell_argument:
+    CommandLine|contains:
+      - ' -e /bin/sh'
+      - ' -e /bin/bash'
+  selection_socat:
+    CommandLine|contains|all:
+      - 'socat'
+      - 'exec:'
+  selection_fifo:
+    CommandLine|contains|all:
+      - 'mkfifo'
+      - '/bin/sh'
+      - 'nc '
+  condition: selection_devtcp or (selection_netcat_image and selection_netcat_exec) or selection_shell_argument or selection_socat or selection_fifo
+falsepositives:
+  - Health checks that test a port with bash /dev/tcp
+level: high

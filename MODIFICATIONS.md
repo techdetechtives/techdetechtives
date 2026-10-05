@@ -10,9 +10,9 @@ Applied by `platform/apply-overlay.sh` on the manager node. First applied in ver
 | --- | --- | --- |
 | Login banner | `/opt/so/saltstack/local/salt/soc/files/soc/banner.md` | Replaced with the TechDetechtives banner. Previous file backed up. |
 | Console overview page | `/opt/so/saltstack/local/salt/soc/files/soc/motd.md` | Replaced with the TechDetechtives overview, which shows the TechDetechtives emblem (an image loaded from this repository on GitHub, or from an address you choose). Previous file backed up. |
-| Sigma rules | `/nsm/rules/custom-local-repos/local-sigma` | 4 rule files added and committed |
-| Suricata rules | `/nsm/rules/custom-local-repos/local-suricata` | 1 rule file (2 rules, SIDs 1900001 and 1900002) added and committed |
-| YARA rules | `/nsm/rules/custom-local-repos/local-yara` | 1 rule file added and committed |
+| Sigma rules | `/nsm/rules/custom-local-repos/local-sigma` | 19 rule files added and committed (16 for endpoint threats, 3 for industrial protocols) |
+| Suricata rules | `/nsm/rules/custom-local-repos/local-suricata` | 2 rule files added and committed: 2 general rules (SIDs 1900001 and 1900002) and 34 industrial-protocol rules (SIDs 1900101 to 1900173) |
+| YARA rules | `/nsm/rules/custom-local-repos/local-yara` | 3 rule files (12 rules) added and committed |
 | Which rules are switched on at import | `/opt/so/saltstack/local/pillar/soc/soc_soc.sls`, settings `enabledSigmaRules` and `autoEnabledYaraRules` | The local Sigma and YARA rulesets are added to the platform's own lists (the same settings as Administration, Configuration in the console). Other settings in the file are kept; the file is rewritten in the platform's own format and the previous copy is backed up. Since 0.5.0; skipped with `--no-auto-enable`. |
 
 Applied by `platform/create-readonly-key.sh`:
@@ -79,7 +79,7 @@ Added in 0.5.0. `skills/community/` holds documents copied **unchanged** from th
 
 ## Test status
 
-As of 0.6.0.
+As of 0.7.0.
 
 Confirmed on a live system (Security Onion 2.4.211 standalone, with a second VM; 2026-10-04 and 2026-10-05):
 
@@ -96,6 +96,8 @@ Tested with automated checks or stand-ins:
 - `scripts/fetch-upstream.sh` and `skills/sync-skills.sh` against GitHub; a fresh fetch reproduces `skills/MANIFEST.sha256`.
 - `skills/install-skills.sh` install, re-install, skip-existing and remove.
 - `platform/detections/validation.yml`: every test id and name was checked against the Atomic Red Team definitions at the pinned commit.
+- Detection rules (`platform/tests/test_detection_rules.py`): every Sigma rule evaluated against sample events that must and must not match; Suricata rules checked for structure, and the S7 and IEC 104 byte positions against known requests; YARA rules compiled and run against generated sample files with YARA 4.5.2 (that part is skipped where `yara` is not installed).
+- Every Sigma rule was converted with the platform's own conversion command line and pipeline files (Security Onion 2.4.211), using the Sigma library from source, and the resulting queries were read.
 - `td_hunt` sample-data loading, flattening, Spark preparation and process-tree functions.
 - Every notebook code cell, executed on the sample data with pandas. For the Spark SQL cells, an SQLite stand-in ran the same SQL text.
 - Honeypot: 41 automated tests against a stand-in for the platform and log files in OpenCanary's format, covering alert contents, one alert per address and decoy with repeats stored as plain events, escalation, restarts, ignored addresses, withheld passwords, cleaning of visitor-supplied text, outages, partly delivered batches, a wrong key, an event the platform cannot store, log rotation, late delivery, and the generated settings. The generated settings file passes OpenCanary's own settings check. The installer was run with stand-ins for Docker, and `docker compose config` accepts the files. A honeypot alert was passed through the forwarder's ticket builder.
@@ -110,7 +112,7 @@ Not yet tested:
 
 - The rule-enable setting on a live platform: that the console accepts the rewritten settings file and switches newly imported local rules on.
 - `platform/apply-overlay.sh rules` against a live detection list (its query was written from the platform's index mapping).
-- Any rule firing on a live install. The Sigma rules have not been run through the platform's Sigma conversion, the Suricata and YARA rules have not been through their engines' syntax checks, and none of the tests in `validation.yml` has been run; each entry says `confirmed: "no"`.
+- Any rule firing on a live install. The Suricata rules have not been loaded into Suricata (no copy of it was available to check them), the YARA rules have not been loaded by the platform's file scanner, and none of the tests in `validation.yml` has been run; each entry says `confirmed: "no"`. The field names used by the three industrial Sigma rules come from the platform's ingest settings and the protocol analyzers' source, not from live records.
 - An alert becoming a DFIR-IRIS ticket end to end (the forwarder is connected, but no alert at medium or above had occurred when it was checked).
 - Building the workbench container image, and running Spark and JupyterLab in it. Package versions in `analytics/requirements.txt` are ranges that have not been resolved in a build. `td_hunt` has not read from a live Elasticsearch.
 - Greenbone has not been started from this setup. The connector has not read from a real Greenbone: its protocol handling was written from the published protocol and tested against a stand-in, so field names in real responses may need adjusting. Its container image has not been built, and findings have not been written to a real platform data stream.
