@@ -1,0 +1,275 @@
+{
+ "name": "TechDetechtives OT IDS detections",
+ "versions": {
+  "attack": "19",
+  "navigator": "5.1.0",
+  "layer": "4.5"
+ },
+ "domain": "ics-attack",
+ "description": "Techniques with a detection. Score 2: direct. Score 1: related only. the detections kept in this repository (the shared rules in platform/detections, the OT IDS rules in ot-ids/detections), the YARA rules, the Zeek ACID package the product loads, and the layer 2 watch.",
+ "techniques": [
+  {
+   "techniqueID": "T0801",
+   "score": 2,
+   "comment": "Zeek ACID bacnet",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0806",
+   "score": 2,
+   "comment": "Suricata 1900401",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0809",
+   "score": 2,
+   "comment": "Suricata 1900128, 1900153",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0814",
+   "score": 2,
+   "comment": "Suricata 1900101, 1900301, 1900302, 1900303, 1900304, 1900306, 1900307, 1900308, and 10 more \u00b7 Zeek ACID bacnet \u00b7 Zeek layer 2 watch (Many_New_Cards)",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0816",
+   "score": 2,
+   "comment": "Suricata 1900102, 1900121, 1900122, (1900132), 1900141, 1900161, (1900466)",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0822",
+   "score": 1,
+   "comment": "Suricata (1900475), (1900476), (1900477)",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0830",
+   "score": 2,
+   "comment": "Zeek layer 2 watch (ARP_Reply_Burst), Address_Claimed_By_Two_Cards, Address_Taken_Over, Card_Answers_For_Many_Addresses",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0835",
+   "score": 2,
+   "comment": "Zeek ACID (bacnet), enip/cip forcing, s7comm forcing",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0836",
+   "score": 2,
+   "comment": "Suricata (1900109), 1900130, (1900131), (1900143), 1900523 \u00b7 Zeek ACID bacnet, enip/cip, s7comm",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0838",
+   "score": 1,
+   "comment": "Suricata (1900127)",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0843",
+   "score": 2,
+   "comment": "Suricata (1900107), (1900108), 1900464, 1900503, 1900511, (1900513) \u00b7 Zeek ACID bacnet, enip/cip, s7comm",
+   "enabled": true,
+   "showSubtechniques": true
+  },
+  {
+   "techniqueID": "T0845",
+   "score": 2,
+   "comment": "Suricata 1900504, 1900512 \u00b7 Zeek ACID bacnet, s7comm",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0846",
+   "score": 2,
+   "comment": "Suricata 1900301, (1900406), 1900407 \u00b7 Zeek layer 2 watch (ARP_Request_Flood)",
+   "enabled": true,
+   "showSubtechniques": true
+  },
+  {
+   "techniqueID": "T0846.001",
+   "score": 2,
+   "comment": "Suricata 1900311, 1900402",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0846.002",
+   "score": 2,
+   "comment": "Suricata 1900305, 1900408",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0853",
+   "score": 1,
+   "comment": "Suricata (1900002) \u00b7 YARA (TechDetechtives_OT_Script_Stops_Or_Reprograms_Controller), (TechDetechtives_PowerShell_Download_And_Run), (TechDetechtives_PowerShell_Encoded_Launcher), (TechDetechtives_Script_Base64_Decode_And_Invoke), (TechDetechtives_Script_Disables_AMSI), (TechDetechtives_Script_Runs_Command_Through_WScript_Shell)",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0858",
+   "score": 2,
+   "comment": "Suricata (1900123), (1900124), (1900125), (1900126), (1900142), 1900151, 1900152, 1900463, and 5 more \u00b7 Zeek ACID bacnet, enip/cip, s7comm",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0861",
+   "score": 1,
+   "comment": "Suricata (1900403), (1900405)",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0863",
+   "score": 1,
+   "comment": "YARA (TechDetechtives_Shortcut_Starts_Script_Interpreter)",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0866",
+   "score": 2,
+   "comment": "Suricata 1900182, 1900183, (1900184), (1900185)",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0867",
+   "score": 2,
+   "comment": "Suricata (1900409) \u00b7 YARA (TechDetechtives_Credential_Tool_Mimikatz_Text), TechDetechtives_OT_Attack_Framework_SCADA_Modules, TechDetechtives_OT_Exploitation_Framework_Names, TechDetechtives_OT_Industroyer_Component_Names, TechDetechtives_OT_Scan_Script_Names_Industrial_Probes, TechDetechtives_OT_Script_Stops_Or_Reprograms_Controller, TechDetechtives_OT_Stuxnet_File_Names, TechDetechtives_OT_Triton_Framework_Files, and 1 more",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0868",
+   "score": 1,
+   "comment": "Suricata (1900104)",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0869",
+   "score": 1,
+   "comment": "Suricata (1900173) \u00b7 Zeek intelligence (indicator match)",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0878",
+   "score": 2,
+   "comment": "Suricata (1900127) \u00b7 Zeek ACID bacnet",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0883",
+   "score": 1,
+   "comment": "Suricata (1900171), (1900172), (1900181)",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0888",
+   "score": 2,
+   "comment": "Suricata 1900103, 1900104, 1900144, (1900403), (1900404), 1900406, 1900411, 1900461, and 6 more",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T0889",
+   "score": 2,
+   "comment": "Suricata (1900153), 1900513",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T1691",
+   "comment": "Through its sub-techniques",
+   "enabled": true,
+   "showSubtechniques": true
+  },
+  {
+   "techniqueID": "T1691.002",
+   "score": 2,
+   "comment": "Suricata 1900127, 1900521",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T1692",
+   "comment": "Through its sub-techniques",
+   "enabled": true,
+   "showSubtechniques": true
+  },
+  {
+   "techniqueID": "T1692.001",
+   "score": 2,
+   "comment": "Suricata 1900110, 1900111, 1900461, 1900475",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T1693",
+   "comment": "Through its sub-techniques",
+   "enabled": true,
+   "showSubtechniques": true
+  },
+  {
+   "techniqueID": "T1693.001",
+   "score": 2,
+   "comment": "Suricata 1900106, (1900409)",
+   "enabled": true,
+   "showSubtechniques": false
+  },
+  {
+   "techniqueID": "T1695",
+   "comment": "Through its sub-techniques",
+   "enabled": true,
+   "showSubtechniques": true
+  },
+  {
+   "techniqueID": "T1695.002",
+   "score": 1,
+   "comment": "Suricata (1900143)",
+   "enabled": true,
+   "showSubtechniques": false
+  }
+ ],
+ "gradient": {
+  "colors": [
+   "#ffffff",
+   "#ffe08a",
+   "#5bbf7a"
+  ],
+  "minValue": 0,
+  "maxValue": 2
+ },
+ "legendItems": [
+  {
+   "label": "Direct detection",
+   "color": "#5bbf7a"
+  },
+  {
+   "label": "Related detection only",
+   "color": "#ffe08a"
+  }
+ ],
+ "showTacticRowBackground": false,
+ "selectTechniquesAcrossTactics": true,
+ "selectSubtechniquesWithParent": false
+}

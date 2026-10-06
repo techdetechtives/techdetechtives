@@ -12,10 +12,15 @@ What is checked here, without the product or a network:
 * The tools: Snort conversion, pruning from engine output, indicator
   conversion, the vulnerability index, the source list.
 * The anomaly detectors, alert monitors and hardening files: shape only.
+* MITRE ATT&CK for ICS: every rule here is in the mapping, every technique
+  named exists in the reference, tagging keeps a rule's structure, and the
+  coverage page in docs/ is what the tool writes today.
 """
 
 import configparser
+import contextlib
 import csv
+import io
 import json
 import re
 import shutil
@@ -29,6 +34,7 @@ KIT = Path(__file__).resolve().parents[1]
 ROOT = KIT.parent
 sys.path.insert(0, str(KIT / "tools"))
 
+import attack_ics         # noqa: E402
 import cve_index          # noqa: E402
 import ioc2intel          # noqa: E402
 import prune_rules        # noqa: E402
@@ -217,8 +223,10 @@ class SuricataBytePositions(unittest.TestCase):
         self.assertEqual(self.iec104(0x67)[6], 0x67)
 
     def test_umas(self):
+        # "download" and "upload" as automation practice uses them: 0x30 writes a program to
+        # the controller, 0x33 reads it out. The public UMAS write-ups name them the other way.
         umas = {name: self.modbus(0x5A, bytes([0x00, code]) + b"\x00\x00") for name, code in
-                {"stop": 0x41, "start": 0x40, "download": 0x33, "upload": 0x30, "reserve": 0x10, "read_id": 0x02, "keepalive": 0x12}.items()}
+                {"stop": 0x41, "start": 0x40, "download": 0x30, "upload": 0x33, "reserve": 0x10, "read_id": 0x02, "keepalive": 0x12}.items()}
         write_register = self.modbus(0x06, b"\x00\x41\x00\x41")           # ordinary Modbus write carrying 0x41
         others = lambda keep: [packet for name, packet in umas.items() if name != keep] + [write_register]   # noqa: E731
         self.check({1900501: ([umas["stop"]], others("stop")), 1900502: ([umas["start"]], others("start")),
@@ -528,7 +536,7 @@ class PlatformContent(unittest.TestCase):
 
     def test_monitors(self):
         files = sorted((KIT / "detections" / "monitors").glob("*.json"))
-        self.assertEqual(len(files), 2)
+        self.assertEqual(len(files), 3)
         names = set()
         for path in files:
             body = json.loads(path.read_text())
@@ -539,7 +547,7 @@ class PlatformContent(unittest.TestCase):
             trigger = body["triggers"][0]["query_level_trigger"]
             self.assertEqual(trigger["actions"][0]["destination_id"], "malcolm-api-loopback-webhook")
             json.dumps(body["inputs"][0]["search"]["query"])
-        self.assertEqual(len(names), 2)
+        self.assertEqual(len(names), 3)
 
     def test_correlation_monitor_looks_for_the_correlation_rules_by_name(self):
         body = json.loads((KIT / "detections" / "monitors" / "techdetechtives_ot_correlation_alert_monitor.json").read_text())
@@ -583,6 +591,367 @@ class HardeningFiles(unittest.TestCase):
         for path in scripts:
             self.assertEqual(subprocess.run(["bash", "-n", str(path)], capture_output=True).returncode, 0, path.name)
             self.assertTrue(path.stat().st_mode & 0o111, f"{path.name} must be executable")
+
+
+class AttackIcs(unittest.TestCase):
+    """MITRE ATT&CK for ICS: the reference, the mapping tables, tagging and the coverage report."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.reference = attack_ics.Reference()
+        cls.mapping = attack_ics.Mapping(cls.reference)   # raises if a row names an unknown technique or tactic
+
+    @staticmethod
+    def run_tool(arguments):
+        with contextlib.redirect_stderr(io.StringIO()):
+            return attack_ics.main(arguments)
+
+    def test_reference(self):
+        ref = self.reference
+        self.assertEqual([tactic["id"] for tactic in ref.tactics],
+                         ["TA0108", "TA0104", "TA0110", "TA0111", "TA0103", "TA0102", "TA0109", "TA0100", "TA0101",
+                          "TA0107", "TA0106", "TA0105"])
+        self.assertGreaterEqual(len(ref.techniques), 90)
+        for key, technique in ref.techniques.items():
+            self.assertRegex(key, r"^T\d{4}(\.\d{3})?$")
+            self.assertTrue(technique["tactics"], key)
+            self.assertTrue(set(technique["tactics"]) <= set(ref.tactic_names), key)
+            self.assertEqual(bool(technique["parent"]), "." in key, key)
+            if technique["parent"]:
+                self.assertEqual(technique["parent"], key.split(".")[0])
+                self.assertIn(technique["parent"], ref.techniques)
+            self.assertTrue(technique["summary"].endswith("."), key)
+            self.assertTrue(set(technique["mitigations"]) <= set(ref.mitigations), key)
+        for old, new in ref.superseded.items():
+            self.assertNotIn(old, ref.techniques)
+            self.assertIn(new, ref.techniques)
+        for actor in ref.actors:
+            self.assertTrue(set(actor["techniques"]) <= set(ref.techniques), actor["name"])
+        # MITRE's licence asks for its copyright line and the licence in every copy.
+        self.assertIn("The MITRE Corporation", ref.data["copyright"])
+        self.assertIn("non-exclusive, royalty-free license", ref.data["licence"])
+        self.assertRegex(ref.data["source_commit"], r"^[0-9a-f]{40}$")
+
+    def test_reference_is_built_from_mitres_data_format(self):
+        def obj(kind, ident, external=None, **more):
+            body = {"type": kind, "id": f"{kind}--{ident}", **more}
+            if external:
+                body["external_references"] = [{"source_name": "mitre-attack", "external_id": external}]
+            return body
+
+        def rel(kind, source, target):
+            return {"type": "relationship", "id": f"relationship--{source}{target}{kind}", "relationship_type": kind,
+                    "source_ref": source, "target_ref": target}
+
+        phase = [{"kill_chain_name": "mitre-ics-attack", "phase_name": "discovery"}]
+        objects = [
+            obj("x-mitre-collection", "c", name="ICS ATT&CK", x_mitre_version="9.9", modified="2026-01-01T00:00:00Z"),
+            obj("x-mitre-tactic", "disc", "TA0102", name="Discovery", x_mitre_shortname="discovery"),
+            obj("x-mitre-matrix", "m", tactic_refs=["x-mitre-tactic--disc"]),
+            obj("attack-pattern", "a", "T0001", name="Find Things", kill_chain_phases=phase,
+                description="Adversaries may find things (Citation: X). They use [a tool](https://example.org/t). More."),
+            obj("attack-pattern", "b", "T0001.001", name="Find Faster", kill_chain_phases=phase,
+                x_mitre_is_subtechnique=True, description="Adversaries may hurry."),
+            obj("attack-pattern", "old", "T0000", name="Old Name", revoked=True, kill_chain_phases=phase),
+            obj("attack-pattern", "gone", "T0002", name="Dropped", x_mitre_deprecated=True, kill_chain_phases=phase),
+            obj("course-of-action", "m1", "M0001", name="Segment"),
+            obj("x-mitre-data-component", "dc", "DC0001", name="Network Traffic Content"),
+            obj("x-mitre-analytic", "an", "AN0001",
+                x_mitre_log_source_references=[{"x_mitre_data_component_ref": "x-mitre-data-component--dc"}]),
+            obj("x-mitre-detection-strategy", "ds", "DET0001", x_mitre_analytic_refs=["x-mitre-analytic--an"]),
+            obj("malware", "mw", "S0001", name="Badware"),
+            rel("subtechnique-of", "attack-pattern--b", "attack-pattern--a"),
+            rel("revoked-by", "attack-pattern--old", "attack-pattern--a"),
+            rel("mitigates", "course-of-action--m1", "attack-pattern--a"),
+            rel("detects", "x-mitre-detection-strategy--ds", "attack-pattern--a"),
+            rel("uses", "malware--mw", "attack-pattern--b"),
+            rel("uses", "malware--mw", "attack-pattern--gone"),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "stix.json"
+            path.write_text(json.dumps({"objects": objects}))
+            built = attack_ics.build_reference(path, "0" * 40)
+        self.assertEqual(built["version"], "9.9")
+        self.assertEqual(built["tactics"], [{"id": "TA0102", "name": "Discovery", "shortname": "discovery"}])
+        self.assertEqual(sorted(built["techniques"]), ["T0001", "T0001.001"])
+        first = built["techniques"]["T0001"]
+        self.assertEqual(first["summary"], "Adversaries may find things.")
+        self.assertEqual((first["tactics"], first["parent"], first["mitigations"], first["data_components"]),
+                         (["TA0102"], None, ["M0001"], ["Network Traffic Content"]))
+        self.assertEqual(built["techniques"]["T0001.001"]["parent"], "T0001")
+        self.assertEqual(built["superseded"], {"T0000": "T0001"})
+        self.assertEqual(built["actors"], [{"id": "S0001", "name": "Badware", "kind": "software", "techniques": ["T0001.001"]}])
+
+    def test_every_rule_in_this_repository_is_in_the_mapping(self):
+        sids = {re.search(r"sid:(\d+);", line).group(1) for _, _, line in RULES + SHARED}
+        self.assertEqual(sids - set(self.mapping.by_sid), set(), "rules with no row in attack/rule-mapping.csv")
+        self.assertEqual(set(self.mapping.by_sid) - sids, set(), "rows in attack/rule-mapping.csv for rules that do not exist")
+        for sid, entries in self.mapping.by_sid.items():
+            techniques = [entry["technique"] for entry in entries]
+            self.assertEqual(len(techniques), len(set(techniques)), f"sid {sid} names a technique twice")
+            if None in techniques:
+                self.assertEqual(techniques, [None], f"sid {sid}: '-' cannot be mixed with techniques")
+
+    def test_markers_have_no_technique_and_chains_have_two_tactics(self):
+        for name, _, line in RULES:
+            if "correlation" not in name:
+                continue
+            sid = re.search(r"sid:(\d+);", line).group(1)
+            entries = [entry for entry in self.mapping.by_sid[sid] if entry["technique"]]
+            if "noalert;" in line:
+                self.assertEqual(entries, [], f"marker {sid} raises no alert, so it carries no technique")
+            elif "Address identified controllers, then" in line:
+                written = attack_ics.tagged_entries(entries)
+                self.assertEqual(len({entry["tactic"] for entry in written}), 2, f"{sid}: the two steps are two tactics")
+                self.assertIn("T0888", [entry["technique"] for entry in written], f"{sid}: the first step is identification")
+
+    def test_tag_names_are_safe_in_rule_metadata(self):
+        self.assertEqual(attack_ics.tag_name("Device Restart/Shutdown"), "Device_Restart_or_Shutdown")
+        self.assertEqual(attack_ics.tag_name("Point & Tag Identification"), "Point_and_Tag_Identification")
+        self.assertEqual(attack_ics.tag_name("Brute Force I/O"), "Brute_Force_IO")
+        for technique in self.reference.techniques.values():
+            self.assertRegex(attack_ics.tag_name(technique["name"]), r"^[A-Za-z0-9_]+$")
+        for name in self.reference.tactic_names.values():
+            self.assertRegex(attack_ics.tag_name(name), r"^[A-Za-z0-9_]+$")
+
+    def test_tagging_keeps_the_rule_and_is_done_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rules = Path(tmp) / "suricata" / "rules"
+            rules.mkdir(parents=True)
+            for folder in (KIT / "detections" / "suricata", ROOT / "platform" / "detections" / "suricata"):
+                for path in folder.glob("*.rules"):
+                    shutil.copy(path, rules / path.name)
+            before = {path.name: path.read_text() for path in rules.glob("*.rules")}
+            counts = attack_ics.tag_folder(tmp, self.reference, self.mapping)
+            after = {path.name: path.read_text() for path in rules.glob("*.rules")}
+            again = attack_ics.tag_folder(tmp, self.reference, self.mapping)
+            self.assertEqual(after, {path.name: path.read_text() for path in rules.glob("*.rules")}, "second run changed a file")
+        self.assertGreaterEqual(counts["tagged"], 70)
+        self.assertNotIn("unmapped", counts)
+        self.assertEqual(again.get("already"), counts["tagged"])
+        self.assertNotIn("tagged", again)
+        added = re.compile(r", ((?:(?:mitre_(?:sub)?t(?:actic|echnique)_(?:id|name)|td_attack_fit) [A-Za-z0-9_.]+(?:, )?)+);")
+        for name in before:
+            old_lines, new_lines = before[name].split("\n"), after[name].split("\n")
+            self.assertEqual(len(old_lines), len(new_lines))
+            for old, new in zip(old_lines, new_lines):
+                if old == new:
+                    continue
+                sid = re.search(r"sid:(\d+);", old).group(1)
+                match = added.search(new)
+                self.assertIsNotNone(match, new)
+                self.assertEqual(new.replace(match.group(0), ";"), old, f"sid {sid}: only the technique may be added")
+                self.assertNotIn("noalert;", new)
+                pairs = [item.split(" ") for item in match.group(1).split(", ")]
+                keys = [key for key, _ in pairs]
+                for needed in attack_ics.TAG_KEYS[:4]:   # the four keys the product reads
+                    self.assertIn(needed, keys, f"sid {sid}")
+                rows = self.mapping.by_sid[sid]
+                wanted = [entry for index, entry in enumerate(rows) if index == 0 or entry["fit"] == "direct"]
+                self.assertEqual([value for key, value in pairs if key == "td_attack_fit"], [rows[0]["fit"]], f"sid {sid}")
+                self.assertEqual({value for key, value in pairs if key == "mitre_tactic_id"}, {entry["tactic"] for entry in wanted})
+                self.assertEqual({value for key, value in pairs if key == "mitre_technique_id"},
+                                 {self.reference.parent(entry["technique"]) for entry in wanted})
+                self.assertEqual({value for key, value in pairs if key == "mitre_subtechnique_id"},
+                                 {entry["technique"] for entry in wanted if "." in entry["technique"]})
+
+    def test_tagging_odd_lines(self):
+        tag = lambda line: attack_ics.tag_line(line, self.reference, self.mapping)   # noqa: E731
+        imported = ('alert tcp any any -> any 502 (msg:"SCADA_IDS: Modbus TCP - Force Listen Only Mode; (x)"; content:"|08 00 04|"; '
+                    'metadata:td_source quickdraw, td_orig_sid 1111001; sid:1911035;)')
+        line, outcome = tag(imported)
+        self.assertEqual(outcome, "tagged")
+        self.assertIn("td_orig_sid 1111001, mitre_tactic_id TA0107, mitre_tactic_name Inhibit_Response_Function, "
+                      "mitre_technique_id T0814, mitre_technique_name Denial_of_Service, td_attack_fit direct; sid:1911035;)", line)
+        self.assertIn('msg:"SCADA_IDS: Modbus TCP - Force Listen Only Mode; (x)";', line)
+        # No metadata option yet: one is added before the closing bracket.
+        line, outcome = tag('alert tcp any any -> any 102 (msg:"x"; sid:1900151; rev:1;)')
+        self.assertEqual((outcome, line), ("tagged", 'alert tcp any any -> any 102 (msg:"x"; sid:1900151; rev:1; metadata:mitre_tactic_id TA0104, '
+                         'mitre_tactic_name Execution, mitre_technique_id T0858, mitre_technique_name Change_Operating_Mode, td_attack_fit direct;)'))
+        # A sub-technique goes in its own key, its parent in the key the product reads.
+        line, _ = tag('alert modbus any any -> any any (msg:"x"; sid:1900111; metadata:created_at 2026_10_05;)')
+        self.assertIn("mitre_technique_id T1692, mitre_technique_name Unauthorized_Message, "
+                      "mitre_subtechnique_id T1692.001, mitre_subtechnique_name Command_Message, td_attack_fit direct;)", line)
+        # A related first technique is written, and marked as such; a related second one is not written.
+        line, _ = tag('alert tcp any any -> any 44818 (msg:"x"; sid:1900465;)')
+        self.assertIn("mitre_tactic_id TA0104, mitre_tactic_id TA0102,", line)
+        self.assertIn("mitre_technique_id T0858, mitre_technique_id T0888,", line)
+        self.assertIn("td_attack_fit related;)", line)
+        line, _ = tag('alert dnp3 any any -> any any (msg:"x"; sid:1900127;)')
+        self.assertIn("mitre_technique_id T1691,", line)
+        self.assertNotIn("T0838", line)
+        self.assertNotIn("T0878", line)
+        # Several metadata options: read together, the last one is added to, and once only.
+        twice = 'alert tcp any any -> any 102 (msg:"x"; metadata:created_at 2026_10_05; sid:1900151; metadata:policy balanced;)'
+        line, outcome = tag(twice)
+        self.assertEqual(outcome, "tagged")
+        self.assertTrue(line.endswith("metadata:policy balanced, mitre_tactic_id TA0104, mitre_tactic_name Execution, "
+                                      "mitre_technique_id T0858, mitre_technique_name Change_Operating_Mode, td_attack_fit direct;)"))
+        self.assertEqual(tag(line), (line, "already"))
+        line, outcome = tag('alert tcp any any -> any any (msg:"POSSBL PORT SCAN (NMAP -sS)"; metadata:td_source nmap-scans, td_orig_sid 1; '
+                            'sid:1912000; metadata:policy balanced;)')
+        self.assertEqual(outcome, "tagged")
+        self.assertIn("mitre_subtechnique_id T0846.001", line)
+        # Indented rules are rules too.
+        self.assertEqual(tag('  alert tcp any any -> any 102 (msg:"x"; sid:1900151;)')[1], "tagged")
+        for untouched, outcome in (
+            ("# alert tcp any any -> any any (msg:\"x\"; sid:1900151;)", "skipped"),
+            ("#PRUNED alert tcp any any -> any any (msg:\"x\"; sid:1900151;)", "skipped"),
+            ("", "skipped"),
+            ('alert tcp any any -> any any (msg:"someone else\'s rule"; sid:2000001;)', "unmapped"),
+            ('alert tcp any any -> any any (msg:"x"; metadata:mitre_technique_id T1190; sid:1900151;)', "already"),
+            ('alert tcp any any -> any any (msg:"x"; sid:1900186;)', "none"),
+            ('alert tcp any any -> any 102 (msg:"x"; flowbits:set,seen; flowbits:noalert; sid:1900151;)', "marker"),
+            ('alert tcp any any -> any 102 (msg:"x"; noalert; sid:1900151;)', "marker"),
+            ('alert tcp any any -> any any (msg:"New thing"; metadata:td_source quickdraw, td_orig_sid 9; sid:1911999;)', "unmapped"),
+        ):
+            self.assertEqual(tag(untouched), (untouched, outcome))
+
+    def test_imported_rules_are_mapped_by_source_and_message(self):
+        sources = configparser.ConfigParser()
+        sources.read(KIT / "sources.conf")
+        for entry in self.mapping.imports:
+            self.assertIn(entry["source"], sources.sections())
+
+        def in_order(source, msg):
+            return [entry["technique"] for entry in self.mapping.for_rule({"sid": "1", "msg": msg, "source": source})[0]]
+
+        def techniques(source, msg):
+            entries, reviewed = self.mapping.for_rule({"sid": "1", "msg": msg, "source": source})
+            return sorted(entry["technique"] for entry in entries), reviewed
+
+        for source, msg, expected in (
+            ("nmap-scans", "POSSBL PORT SCAN (NMAP -sS)", ["T0846.001"]),
+            ("nmap-scans", "POSSBL SCAN FRAG (NMAP -f)", ["T0846.001"]),
+            ("quickdraw", "SCADA_IDS: DNP3 - Cold Restart From Unauthorized Client", ["T0816", "T0848"]),
+            ("quickdraw", "SCADA_IDS: DNP3 - Disable Unsolicited Responses", ["T0838", "T0878", "T1691.002"]),
+            ("quickdraw", "SCADA_IDS: Modbus TCP - Unauthorized Write Request to a PLC", ["T0848", "T1692.001"]),
+            ("quickdraw", "SCADA_IDS: Modbus TCP - Non-Modbus Communication on TCP Port 502", ["T0885"]),
+            # Digital Bond names transfers from the PC's side, the opposite of ATT&CK's words.
+            ("quickdraw", "Schneider Modicon Function Code 90 - Download Ladder Logic Started", ["T0845"]),
+            ("quickdraw", "Schneider Modicon Function Code 90 - Upload Ladder Logic Started", ["T0843"]),
+            ("quickdraw", "S7 Enumerate Redpoint NSE Request CPU Function Read SZL attempt", ["T0888"]),
+            ("quickdraw", "BACnet Foreign Device Join Attempt", []),
+            # "-" wins where a "-" row and a technique row could both match.
+            ("quickdraw", "BACnet foreign Device Join Attempt From Non Authorized Host", []),
+            ("quickdraw", "BACnet Read Property Attempt From Non Authorized Host", ["T0801"]),
+            ("quickdraw", "S7 Enumerate Redpoint NSE Request CPU Function Read SZL attempt From Non Authorized Host", ["T0888"]),
+            ("elitewolf", "ELITEWOLF Allen-Bradley/Rockwell Automation URL Path Activity-TCP REQUEST", ["T0888"]),
+            ("elitewolf", "ELITEWOLF Allen-Bradley/Rockwell Automation URL Path Activity-CSS Path", []),
+            ("elitewolf", "ELITEWOLF SEL-3530-RTAC URL path activity - homepage", []),
+            ("elitewolf", "ELITEWOLF SEL FTP Activity - Default Password", ["T1694.001"]),
+            ("elitewolf", "ELITEWOLF SEL FTP Activity - STOR SET_DNP1.TXT file", ["T0836"]),
+            ("elitewolf", "ELITEWOLF SEL FTP Activity - RETR DNPMAP.TXT file", ["T0861"]),
+            ("elitewolf", "ELITEWOLF SEL-3530-RTAC Possible AcSELerator Firmware Activity", []),
+            ("elitewolf", "ELITEWOLF_SEL-3620 X509 certificate activity", []),
+        ):
+            self.assertEqual(techniques(source, msg), (expected, True), msg)
+        self.assertEqual(techniques("quickdraw", "A rule added upstream later"), ([], False))
+        # The first row is the one written to the alert when none is direct: the missing master list comes first.
+        self.assertEqual(in_order("quickdraw", "SCADA_IDS: Modbus TCP - Unauthorized Read Request to a PLC"), ["T0848", "T0801"])
+        self.assertEqual(self.mapping.for_rule({"sid": "1", "msg": "x Force Listen Only Mode", "source": "quickdraw"})[0][0]["fit"], "direct")
+        # A source's patterns never reach another source's rules.
+        self.assertEqual(techniques("elitewolf", "POSSBL PORT SCAN (NMAP -sS)"), ([], False))
+
+    def test_other_detections_name_things_that_exist(self):
+        yara_text = "".join(path.read_text() for folder in (KIT / "detections" / "yara", ROOT / "platform" / "detections" / "yara")
+                            for path in folder.glob("*.yar"))
+        yara_rules = set(re.findall(r"^rule (\w+)", yara_text, re.M))
+        watch = (ROOT / "platform" / "zeek" / "techdetechtives" / "l2-watch.zeek").read_text()
+        notices = set(re.findall(r"^\t\t(\w+),$", watch[watch.index("redef enum Notice::Type"):watch.index("};")], re.M))
+        self.assertGreaterEqual(len(notices), 8)
+        mapped = {"yara": set(), "zeek-l2": set()}
+        for entry in self.mapping.others:
+            self.assertIn(entry["kind"], attack_ics.KIND_NAMES)
+            if entry["kind"] in mapped:
+                mapped[entry["kind"]].add(entry["name"])
+            if entry["kind"] == "zeek-l2":
+                self.assertEqual(entry["needs"], "zeek/custom/techdetechtives/l2-watch.zeek")
+                self.assertFalse(entry["tagged"])
+        self.assertEqual(mapped["yara"], yara_rules, "every YARA rule has a row, and only YARA rules that exist")
+        self.assertEqual(mapped["zeek-l2"], notices, "every layer 2 notice has a row, and only notices that exist")
+
+    def test_coverage_page_in_docs_is_current(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self.run_tool(["coverage", "--out-dir", tmp, "--name", "ATTACK-ICS-COVERAGE"]), 0)
+            for name in ("ATTACK-ICS-COVERAGE.md", "ATTACK-ICS-COVERAGE.csv", "attack-ics-layer.json"):
+                self.assertEqual((Path(tmp) / name).read_text(), (KIT / "docs" / name).read_text(),
+                                 f"docs/{name} is out of date: run tools/attack_ics.py coverage --out-dir docs --name ATTACK-ICS-COVERAGE")
+            page = (Path(tmp) / "ATTACK-ICS-COVERAGE.md").read_text()
+            layer = json.loads((Path(tmp) / "attack-ics-layer.json").read_text())
+            with open(Path(tmp) / "ATTACK-ICS-COVERAGE.csv", newline="") as handle:
+                table = list(csv.DictReader(handle))
+        self.assertNotIn("## Rules nobody has mapped yet", page)
+        self.assertNotIn("No note written yet", page, "a gap in network traffic has no row in attack/gap-notes.csv")
+        self.assertIn(self.reference.data["copyright"], page)
+        self.assertEqual(layer["domain"], "ics-attack")
+        for item in layer["techniques"]:
+            self.assertIn(item["techniqueID"], self.reference.techniques)
+        self.assertEqual({row["coverage"] for row in table}, {"direct", "related", "none"})
+        by_id = {row["technique_id"]: row for row in table}
+        self.assertEqual(by_id["T0858"]["coverage"], "direct")
+        self.assertIn("1900151", by_id["T0858"]["detections"])
+        self.assertEqual((by_id["T1692"]["coverage"], by_id["T1692"]["detections"]), ("direct", ""), "counted through its sub-technique")
+        self.assertEqual(by_id["T0879"]["seen_in_if_uncovered"], "effect")
+
+    def test_a_build_counts_only_what_it_ships(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            content, out = Path(tmp) / "content", Path(tmp) / "out"
+            rules = content / "suricata" / "rules"
+            rules.mkdir(parents=True)
+            (rules / "a.rules").write_text(
+                'alert tcp any any -> any 102 (msg:"x"; sid:1900151;)\n'
+                '#PRUNED alert tcp any any -> any 102 (msg:"x"; sid:1900512;)\n'
+                'alert tcp any any -> any any (msg:"POSSBL PORT SCAN (NMAP -sS)"; metadata:td_source nmap-scans, td_orig_sid 3400001; sid:1912000;)\n'
+                'alert tcp any any -> any any (msg:"New upstream rule"; metadata:td_source nmap-scans, td_orig_sid 3400099; sid:1912009;)\n')
+            found, unmapped, _ = attack_ics.gather(self.reference, self.mapping, [rules], content)
+            self.assertEqual([item["label"] for item in found["T0858"] if item["kind"] == "suricata"], ["1900151"])
+            self.assertFalse(any(item["kind"] == "suricata" for item in found.get("T0845", [])), "a pruned rule is not counted")
+            self.assertEqual([item["label"] for item in found["T0846.001"]], ["nmap-scans 1912000"])
+            self.assertEqual(unmapped, [("a.rules", "1912009", "New upstream rule")])
+            self.assertNotIn("T0830", found, "the layer 2 watch is counted only when the build added it")
+            (content / "zeek" / "custom" / "techdetechtives").mkdir(parents=True)
+            (content / "zeek" / "custom" / "techdetechtives" / "l2-watch.zeek").write_text("")
+            found, _, _ = attack_ics.gather(self.reference, self.mapping, [rules], content)
+            self.assertIn("T0830", found)
+            self.assertEqual(self.run_tool(["coverage", "--content", str(content), "--out-dir", str(out)]), 0)
+            self.assertIn("## Rules nobody has mapped yet", (out / "attack-ics-coverage.md").read_text())
+
+    def test_reference_page(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self.run_tool(["reference", "-o", str(Path(tmp) / "ref.md")]), 0)
+            page = (Path(tmp) / "ref.md").read_text()
+        self.assertIn(self.reference.data["copyright"], page)
+        self.assertIn(self.reference.data["licence"], page)
+        for key in self.reference.techniques:
+            self.assertIn(f"### {key} ", page)
+        self.assertIn("| T0855 | T1692.001 Unauthorized Message: Command Message |", page)
+
+    def test_tactic_chain_monitor_counts_the_reference_tactics(self):
+        body = json.loads((KIT / "detections" / "monitors" / "techdetechtives_attack_ics_tactic_chain_monitor.json").read_text())
+        query = body["inputs"][0]["search"]["query"]
+        wanted = [tactic["id"] for tactic in self.reference.tactics]
+        self.assertIn({"terms": {"threat.tactic.id": wanted}}, query["query"]["bool"]["filter"])
+        # ACID raises a tactic-only notice for every session setup; only events that name a technique count.
+        self.assertIn({"exists": {"field": "threat.technique.id"}}, query["query"]["bool"]["filter"])
+        aggs = query["aggregations"]["by_source"]["aggregations"]
+        self.assertEqual(sorted(aggs[key]["filter"]["term"]["threat.tactic.id"] for key in aggs if "filter" in aggs[key]), sorted(wanted))
+        self.assertEqual(sorted(aggs["tactics"]["bucket_script"]["buckets_path"]), sorted(key.lower() for key in wanted))
+        self.assertEqual(aggs["three_or_more_tactics"]["bucket_selector"]["script"], "params.t >= 3")
+
+    def test_content_collection_tags_rules_and_ships_the_reference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            done = subprocess.run([str(KIT / "tools" / "collect-content.sh"), tmp], capture_output=True, text=True)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            text = (Path(tmp) / "suricata" / "rules" / "techdetechtives-ot.rules").read_text()
+            self.assertIn("mitre_technique_id T0858", text)
+            self.assertTrue((Path(tmp) / "attack-ics" / "attack-ics-techniques.md").is_file())
+        with tempfile.TemporaryDirectory() as tmp:
+            done = subprocess.run([str(KIT / "tools" / "collect-content.sh"), tmp], capture_output=True, text=True,
+                                  env={"PATH": "/usr/local/bin:/usr/bin:/bin", "ATTACK_ICS_TAGS": "false"})
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertEqual((Path(tmp) / "suricata" / "rules" / "techdetechtives-ot.rules").read_text(),
+                             (ROOT / "platform" / "detections" / "suricata" / "techdetechtives-ot.rules").read_text())
 
 
 if __name__ == "__main__":

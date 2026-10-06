@@ -1,6 +1,6 @@
 # Notices
 
-TechDetechtives combines original work with seven upstream projects, and refers to an eighth. Each part keeps its own licence. This file is not legal advice.
+TechDetechtives combines original work with seven upstream projects, refers to an eighth, and carries a reference list drawn from MITRE ATT&CK. Each part keeps its own licence. This file is not legal advice.
 
 ## 1. Security Onion (platform base)
 
@@ -62,7 +62,7 @@ Greenbone is installed unmodified from its official container images. `vulnerabi
 - Licence: Apache License 2.0, full text in `licenses/Apache-2.0.txt` and in each copied skill folder
 - Commit copied from: see `upstream.lock`
 
-**A selection of this project's documents is included in this repository**, under `skills/community/`: for each of the skills named in `skills/selection.txt`, its `SKILL.md`, `LICENSE`, `references/` and `assets/` files. The files are unchanged; `skills/MANIFEST.sha256` records their checksums. The upstream `scripts/` folders and translations are not included. This is the only upstream material copied into this repository.
+**A selection of this project's documents is included in this repository**, under `skills/community/`: for each of the skills named in `skills/selection.txt`, its `SKILL.md`, `LICENSE`, `references/` and `assets/` files. The files are unchanged; `skills/MANIFEST.sha256` records their checksums. The upstream `scripts/` folders and translations are not included. Apart from the MITRE ATT&CK reference list in section 8, this is the only upstream material copied into this repository.
 
 The project is an independent community effort. It is not affiliated with Anthropic, and TechDetechtives is not affiliated with or endorsed by its authors or by Anthropic.
 
@@ -92,9 +92,21 @@ Malcolm bundles Zeek, Suricata, Arkime, OpenSearch, NetBox and other tools, each
 
 External rule sets and threat indicators are downloaded when an ISO or an update is built, not stored here. `ot-ids/sources.conf` names each one and its licence: by default NSA ELITEWOLF (CC0), Digital Bond Quickdraw (MIT), Aleksi Bovellan's Nmap scan detection rules (MIT), a selection from Critical Path Security's collection of public threat feeds (MIT collection; each feed keeps its own terms) and CISA's Known Exploited Vulnerabilities catalogue (CC0). Sources under the GPL or custom terms are listed but switched off.
 
-## 8. Original TechDetechtives work
+## 8. MITRE ATT&CK for ICS (technique reference of the OT IDS)
 
-Everything outside `analytics/` and `skills/community/` (the platform overlay, rules, ticket forwarder, vulnerability connector and dashboard, honeypot shipper and setup, the skills under `skills/techdetechtives/`, the OT IDS build, rules and tools under `ot-ids/`, scripts and documentation) is original work, Copyright (c) 2026 TechDetechtives, under the MIT licence in `LICENSE`.
+- Source: MITRE ATT&CK for ICS 19.2, https://attack.mitre.org, data from https://github.com/mitre-attack/attack-stix-data (commit in `upstream.lock`)
+- © 2026 The MITRE Corporation. This work is reproduced and distributed with the permission of The MITRE Corporation.
+- Licence (MITRE's ATT&CK terms of use): The MITRE Corporation (MITRE) hereby grants you a non-exclusive, royalty-free license to use ATT&CK® for research, development, and commercial purposes. Any copy you make for such purposes is authorized provided that you reproduce MITRE's copyright designation and this license in any such copy.
+
+**`ot-ids/attack/ics-attack.json` reproduces parts of ATT&CK for ICS**: the identifiers and names of its tactics, techniques, mitigations, software, groups and campaigns, which technique belongs to which, the data components MITRE lists for detecting each technique, and the first sentence of each technique's description. The wording is MITRE's; citation markers and links are taken out of the sentences. The coverage files under `ot-ids/docs/`, the pages the OT IDS build places in `~/Malcolm/attack-ics/` on an installed system, and the technique names written into rule metadata are made from it. The copyright line and the licence above are inside the reference file and each generated page, and must stay with any copy.
+
+Which TechDetechtives detection is mapped to which technique (`ot-ids/attack/*.csv`) is TechDetechtives' own judgement, not MITRE's. MITRE does not claim ATT&CK lists every possible adversary behaviour, and provides it "as is" without warranty. MITRE ATT&CK® and ATT&CK® are registered trademarks of The MITRE Corporation. TechDetechtives is not affiliated with or endorsed by MITRE.
+
+The ACID package (https://github.com/cisagov/ACID, © The MITRE Corporation, Apache-2.0) is part of Malcolm and is not included here; `ot-ids/attack/other-detections.csv` lists the techniques it reports, as read from its source.
+
+## 9. Original TechDetechtives work
+
+Everything outside `analytics/`, `skills/community/` and `ot-ids/attack/ics-attack.json` (the platform overlay, rules, ticket forwarder, vulnerability connector and dashboard, honeypot shipper and setup, the skills under `skills/techdetechtives/`, the OT IDS build, rules and tools under `ot-ids/`, scripts and documentation) is original work, Copyright (c) 2026 TechDetechtives, under the MIT licence in `LICENSE`.
 
 The TechDetechtives emblem in `branding/` was supplied by the project owner. It contains no other organisation's logo. The images under `ot-ids/overlay/branding/` are made from it by `ot-ids/tools/make-artwork.py`.
 

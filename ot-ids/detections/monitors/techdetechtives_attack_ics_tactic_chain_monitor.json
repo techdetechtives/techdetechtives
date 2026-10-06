@@ -1,0 +1,226 @@
+{
+  "type": "monitor",
+  "name": "TechDetechtives ATT&CK for ICS Tactic Chain Monitor",
+  "monitor_type": "query_level_monitor",
+  "enabled": false,
+  "schedule": {
+    "period": {
+      "interval": 30,
+      "unit": "MINUTES"
+    }
+  },
+  "inputs": [
+    {
+      "search": {
+        "indices": [
+          "MALCOLM_NETWORK_INDEX_PATTERN_REPLACER"
+        ],
+        "query": {
+          "size": 0,
+          "query": {
+            "bool": {
+              "filter": [
+                {
+                  "range": {
+                    "MALCOLM_NETWORK_INDEX_TIME_FIELD_REPLACER": {
+                      "from": "{{period_end}}||-24h",
+                      "to": "{{period_end}}",
+                      "include_lower": true,
+                      "include_upper": true,
+                      "format": "epoch_millis",
+                      "boost": 1
+                    }
+                  }
+                },
+                {
+                  "exists": {
+                    "field": "source.ip"
+                  }
+                },
+                {
+                  "exists": {
+                    "field": "threat.technique.id"
+                  }
+                },
+                {
+                  "terms": {
+                    "threat.tactic.id": [
+                      "TA0108",
+                      "TA0104",
+                      "TA0110",
+                      "TA0111",
+                      "TA0103",
+                      "TA0102",
+                      "TA0109",
+                      "TA0100",
+                      "TA0101",
+                      "TA0107",
+                      "TA0106",
+                      "TA0105"
+                    ]
+                  }
+                }
+              ],
+              "adjust_pure_negative": true,
+              "boost": 1
+            }
+          },
+          "aggregations": {
+            "by_source": {
+              "terms": {
+                "field": "source.ip",
+                "size": 50
+              },
+              "aggregations": {
+                "ta0108": {
+                  "filter": {
+                    "term": {
+                      "threat.tactic.id": "TA0108"
+                    }
+                  }
+                },
+                "ta0104": {
+                  "filter": {
+                    "term": {
+                      "threat.tactic.id": "TA0104"
+                    }
+                  }
+                },
+                "ta0110": {
+                  "filter": {
+                    "term": {
+                      "threat.tactic.id": "TA0110"
+                    }
+                  }
+                },
+                "ta0111": {
+                  "filter": {
+                    "term": {
+                      "threat.tactic.id": "TA0111"
+                    }
+                  }
+                },
+                "ta0103": {
+                  "filter": {
+                    "term": {
+                      "threat.tactic.id": "TA0103"
+                    }
+                  }
+                },
+                "ta0102": {
+                  "filter": {
+                    "term": {
+                      "threat.tactic.id": "TA0102"
+                    }
+                  }
+                },
+                "ta0109": {
+                  "filter": {
+                    "term": {
+                      "threat.tactic.id": "TA0109"
+                    }
+                  }
+                },
+                "ta0100": {
+                  "filter": {
+                    "term": {
+                      "threat.tactic.id": "TA0100"
+                    }
+                  }
+                },
+                "ta0101": {
+                  "filter": {
+                    "term": {
+                      "threat.tactic.id": "TA0101"
+                    }
+                  }
+                },
+                "ta0107": {
+                  "filter": {
+                    "term": {
+                      "threat.tactic.id": "TA0107"
+                    }
+                  }
+                },
+                "ta0106": {
+                  "filter": {
+                    "term": {
+                      "threat.tactic.id": "TA0106"
+                    }
+                  }
+                },
+                "ta0105": {
+                  "filter": {
+                    "term": {
+                      "threat.tactic.id": "TA0105"
+                    }
+                  }
+                },
+                "tactics": {
+                  "bucket_script": {
+                    "buckets_path": {
+                      "ta0108": "ta0108._count",
+                      "ta0104": "ta0104._count",
+                      "ta0110": "ta0110._count",
+                      "ta0111": "ta0111._count",
+                      "ta0103": "ta0103._count",
+                      "ta0102": "ta0102._count",
+                      "ta0109": "ta0109._count",
+                      "ta0100": "ta0100._count",
+                      "ta0101": "ta0101._count",
+                      "ta0107": "ta0107._count",
+                      "ta0106": "ta0106._count",
+                      "ta0105": "ta0105._count"
+                    },
+                    "script": "(params.ta0108 > 0 ? 1 : 0) + (params.ta0104 > 0 ? 1 : 0) + (params.ta0110 > 0 ? 1 : 0) + (params.ta0111 > 0 ? 1 : 0) + (params.ta0103 > 0 ? 1 : 0) + (params.ta0102 > 0 ? 1 : 0) + (params.ta0109 > 0 ? 1 : 0) + (params.ta0100 > 0 ? 1 : 0) + (params.ta0101 > 0 ? 1 : 0) + (params.ta0107 > 0 ? 1 : 0) + (params.ta0106 > 0 ? 1 : 0) + (params.ta0105 > 0 ? 1 : 0)"
+                  }
+                },
+                "three_or_more_tactics": {
+                  "bucket_selector": {
+                    "buckets_path": {
+                      "t": "tactics"
+                    },
+                    "script": "params.t >= 3"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "query_level_trigger": {
+        "name": "TechDetechtives ATT&CK for ICS Tactic Chain",
+        "severity": "1",
+        "condition": {
+          "script": {
+            "source": "ctx.results[0].aggregations.by_source.buckets.size() > 0",
+            "lang": "painless"
+          }
+        },
+        "actions": [
+          {
+            "name": "TechDetechtives ATT&CK for ICS Tactic Chain Action",
+            "destination_id": "malcolm-api-loopback-webhook",
+            "message_template": {
+              "source": "{\n  \"alert\": {\n    \"monitor\": {\n      \"name\": \"{{ctx.monitor.name}}\"\n    },\n    \"trigger\": {\n      \"name\": \"{{ctx.trigger.name}}\",\n      \"severity\": {{ctx.trigger.severity}}\n    },\n    \"period\": {\n      \"start\": \"{{ctx.periodStart}}\",\n      \"end\": \"{{ctx.periodEnd}}\"\n    },\n    \"results\": {{#toJson}}ctx.results{{/toJson}},\n    \"body\": \"{{#toJson}}ctx.payload{{/toJson}}\",\n    \"alert\": \"{{ctx.alert.id}}\",\n    \"error\": \"{{ctx.error}}\"\n  }\n}",
+              "lang": "mustache"
+            },
+            "throttle_enabled": true,
+            "subject_template": {
+              "source": "",
+              "lang": "mustache"
+            },
+            "throttle": {
+              "value": 360,
+              "unit": "MINUTES"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

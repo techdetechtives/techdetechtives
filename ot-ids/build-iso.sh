@@ -32,6 +32,7 @@ BRAND_WEB="${BRAND_WEB:-true}"                     # true = logo and name in the
 BUILD_MODE="${BUILD_MODE:-auto}"                   # auto | vagrant | native (native = Debian 13 host)
 FETCH_SOURCES="${FETCH_SOURCES:-true}"             # true = download the sources enabled in sources.conf
 ZEEK_L2_WATCH="${ZEEK_L2_WATCH:-true}"             # true = add the layer 2 (ARP) watch if the product's Zeek accepts it
+ATTACK_ICS_TAGS="${ATTACK_ICS_TAGS:-true}"         # true = write each rule's MITRE ATT&CK for ICS technique into the rule
 HARDENING="${HARDENING:-true}"                     # true = add the files under hardening/ to the ISO
 HARDEN_SHELL_TIMEOUT="${HARDEN_SHELL_TIMEOUT:-900}"        # seconds before an idle SSH/console shell closes; 0 = never
 HARDEN_USB_STORAGE_OFF="${HARDEN_USB_STORAGE_OFF:-false}"  # true = block USB sticks (also blocks updates by USB)
@@ -177,7 +178,8 @@ cmd_prepare() {
   # --- detection content ------------------------------------------------------
   # Shared TechDetechtives rules, the OT IDS rules, your own indicators, and
   # whatever an earlier 'sources' stage downloaded.
-  "$KIT_DIR/tools/collect-content.sh" "$SKEL_DEST" "$FETCHED_DIR"
+  need python3 "Install python3."
+  ATTACK_ICS_TAGS="$ATTACK_ICS_TAGS" "$KIT_DIR/tools/collect-content.sh" "$SKEL_DEST" "$FETCHED_DIR"
 
   apply_hardening
 
@@ -263,9 +265,25 @@ cmd_sources() {
   log "Fetching the sources enabled in sources.conf ..."
   python3 "$KIT_DIR/tools/fetch_sources.py" --config "$KIT_DIR/sources.conf" --out "$FETCHED_DIR" || \
     warn "At least one source could not be fetched (see the lines marked FAILED above). The build continues without it."
-  "$KIT_DIR/tools/collect-content.sh" "$SKEL_DEST" "$FETCHED_DIR"
+  ATTACK_ICS_TAGS="$ATTACK_ICS_TAGS" "$KIT_DIR/tools/collect-content.sh" "$SKEL_DEST" "$FETCHED_DIR"
   mkdir -p "$OUT_DIR"
   cp "$FETCHED_DIR/SOURCES.txt" "$OUT_DIR/external-sources.txt"
+}
+
+# ---------------------------------------------------------------------------
+# MITRE ATT&CK for ICS: which techniques the content going into the ISO has a
+# detection for, and which it does not. Runs after the engine check, so a rule
+# the engine refused is not counted, and after the layer 2 watch is decided.
+attack_ics_report() {
+  compgen -G "$SKEL_DEST/suricata/rules/*.rules" >/dev/null || return 0
+  mkdir -p "$OUT_DIR" "$SKEL_DEST/attack-ics"
+  if python3 "$KIT_DIR/tools/attack_ics.py" coverage --content "$SKEL_DEST" --out-dir "$OUT_DIR" 2> "$WORK_DIR/attack-ics.log"; then
+    sed 's/^/[kit] /' "$WORK_DIR/attack-ics.log" >&2
+    cp "$OUT_DIR/attack-ics-coverage.md" "$OUT_DIR/attack-ics-coverage.csv" "$OUT_DIR/attack-ics-layer.json" "$SKEL_DEST/attack-ics/"
+  else
+    warn "The ATT&CK for ICS coverage report could not be written; the build continues without it:"
+    tail -3 "$WORK_DIR/attack-ics.log" >&2
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -511,6 +529,7 @@ cmd_images() {
     check_rules_with_engine
     add_zeek_scripts
     coverage_report
+    attack_ics_report
     return 0
   fi
   need docker "Install Docker Engine (https://docs.docker.com/engine/install/)."
@@ -538,6 +557,7 @@ cmd_images() {
   check_rules_with_engine
   add_zeek_scripts
   coverage_report
+  attack_ics_report
 }
 
 # ---------------------------------------------------------------------------

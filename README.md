@@ -17,10 +17,10 @@ TechDetechtives is a **modified deployment built on Security Onion**, combined w
 | Honeypot | `honeypot/` | A decoy machine: every contact with its fake services becomes a platform alert and a ticket | OpenCanary 0.9.10 (installed into a container at install, not copied here) | Shipper: MIT. OpenCanary itself: BSD 3-Clause |
 | Network inventory | `network/` | Devices, a traffic map, industrial operations and what changed since a learned baseline, built from what the platform's sensor records; sends nothing to the network | Original | MIT |
 | Analyst skills | `skills/` | Guidance files for an AI assistant: 4 written for this platform, 26 selected from a community library | Community cybersecurity skills library (selected documents copied, unchanged) | TechDetechtives skills: MIT. Community skills: Apache-2.0 |
-| OT IDS appliance | `ot-ids/` | A separate product: builds installer ISOs (server and sensor) for an intrusion detection appliance for industrial networks, with the OT rule sets, behaviour and correlation rules, imported Snort rule sets, threat indicators, anomaly detectors, extra hardening and offline updates | Malcolm 26.09.0 (cloned when the ISO is built, not copied here) | Build scripts, rules and tools: MIT. Malcolm itself: Apache-2.0 |
+| OT IDS appliance | `ot-ids/` | A separate product: builds installer ISOs (server and sensor) for an intrusion detection appliance for industrial networks, with the OT rule sets, behaviour and correlation rules, imported Snort rule sets, threat indicators, anomaly detectors, a MITRE ATT&CK for ICS mapping of every detection, extra hardening and offline updates | Malcolm 26.09.0 (cloned when the ISO is built, not copied here) | Build scripts, rules and tools: MIT. Malcolm itself: Apache-2.0 |
 | Scripts and docs | `scripts/`, `docs/` | Install, verify, fetch upstream | Original | MIT |
 
-Security Onion's code and image are **not** in this repository, and neither are DFIR-IRIS, Greenbone, OpenCanary or Malcolm; the only upstream material copied here is the selection of skill documents in `skills/community/`. You install Security Onion from its official ISO or installer, and this repository customizes that installation through the customization points Security Onion provides. That keeps upgrades working and keeps the two licences separate. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains the design.
+Security Onion's code and image are **not** in this repository, and neither are DFIR-IRIS, Greenbone, OpenCanary or Malcolm; the only upstream material copied here is the selection of skill documents in `skills/community/` and a reference list of MITRE ATT&CK for ICS techniques in `ot-ids/attack/ics-attack.json`. You install Security Onion from its official ISO or installer, and this repository customizes that installation through the customization points Security Onion provides. That keeps upgrades working and keeps the two licences separate. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains the design.
 
 ## Requirements
 
@@ -131,7 +131,7 @@ Installs guidance files that let an AI assistant such as Claude Code help with d
 cd ot-ids && ./build-iso.sh        # on a Linux build host with Docker and Internet access
 ```
 
-Builds two installer ISOs for a standalone industrial network IDS that does not need the Security Onion platform: a server and a capture sensor, based on Malcolm, carrying the Suricata and YARA rules from `platform/detections/` plus rules, anomaly detectors, threat indicators and hardening of its own. It installs and is updated without Internet access. See [ot-ids/README.md](ot-ids/README.md) for what is in it, how to add Snort rule sets and indicators, and what has and has not been tested.
+Builds two installer ISOs for a standalone industrial network IDS that does not need the Security Onion platform: a server and a capture sensor, based on Malcolm, carrying the Suricata and YARA rules from `platform/detections/` plus rules, anomaly detectors, threat indicators and hardening of its own. Its alerts carry their MITRE ATT&CK for ICS technique, and [a coverage page](ot-ids/docs/ATTACK-ICS-COVERAGE.md) shows which techniques have a detection and which do not. It installs and is updated without Internet access. See [ot-ids/README.md](ot-ids/README.md) for what is in it, how to add Snort rule sets and indicators, and what has and has not been tested.
 
 **Try it without a platform:** leave `TD_ES_HOST` empty and run step 3 alone. The notebooks then run on bundled synthetic sample data.
 
@@ -162,7 +162,7 @@ Upgrade the platform with its own upgrade tool (`soup`). The overlay lives in th
 
 ## Status
 
-Version 0.10.0. What has and has not been exercised is listed in [MODIFICATIONS.md](MODIFICATIONS.md#test-status). In short: the overlay, installers, forwarder, connector and notebook logic have automated tests against stand-ins; on a live Security Onion 2.4.211 the console pages, both access keys, DFIR-IRIS and the forwarder's connections were confirmed. Not yet seen on a live system: a rule firing, an alert becoming a ticket, the workbench image and Spark, Greenbone and its connector, the honeypot, the rule-enable setting, the layer 2 watch, and the network inventory.
+Version 0.11.0. What has and has not been exercised is listed in [MODIFICATIONS.md](MODIFICATIONS.md#test-status). In short: the overlay, installers, forwarder, connector and notebook logic have automated tests against stand-ins; on a live Security Onion 2.4.211 the console pages, both access keys, DFIR-IRIS and the forwarder's connections were confirmed. Not yet seen on a live system: a rule firing, an alert becoming a ticket, the workbench image and Spark, Greenbone and its connector, the honeypot, the rule-enable setting, the layer 2 watch, and the network inventory.
 
 ## Licence
 

@@ -39,14 +39,14 @@ git clone https://github.com/techdetechtives/techdetechtives.git && cd techdetec
 ./build-iso.sh
 ```
 
-The ISOs, their checksums, the build logs and three reports land in `out/`.
+The ISOs, their checksums, the build logs and four reports land in `out/`.
 Expect well over an hour. Settings are in `build.conf`.
 
 | Stage | What it does |
 | --- | --- |
-| `./build-iso.sh prepare` | Clones the pinned Malcolm release; applies name, logo and artwork; adds the detection content and the hardening files |
+| `./build-iso.sh prepare` | Clones the pinned Malcolm release; applies name, logo and artwork; adds the detection content (with each rule's ATT&CK for ICS technique) and the hardening files |
 | `./build-iso.sh sources` | Downloads the rule sets and threat feeds enabled in `sources.conf`, converts them, adds them |
-| `./build-iso.sh images` | Pulls the container images, adds the branded and detection layers, packs them; checks every rule with the product's own Suricata; writes the vulnerability coverage report |
+| `./build-iso.sh images` | Pulls the container images, adds the branded and detection layers, packs them; checks every rule with the product's own Suricata; writes the vulnerability and ATT&CK for ICS coverage reports |
 | `./build-iso.sh iso` | Runs the live-build and writes the ISOs to `out/` |
 
 Run `prepare` again after changing `build.conf`, `overlay/`, `detections/`,
@@ -59,6 +59,8 @@ Reports in `out/`:
   refused. Refused rules are commented out (`#PRUNED`) in the ISO, not dropped
   silently.
 - `vulnerability-coverage.csv` and `.md`: see "Vulnerability coverage" below.
+- `attack-ics-coverage.md`, `.csv` and `attack-ics-layer.json`: see "MITRE
+  ATT&CK for ICS" below.
 - `external-sources.txt`: what was downloaded, from where, under which licence.
 
 ## Detection content
@@ -99,10 +101,86 @@ happened. The notices appear in the Notices dashboard. The sensor must receive
 the ARP traffic of the segment it watches. `ZEEK_L2_WATCH="false"` leaves it
 out.
 
+### MITRE ATT&CK for ICS
+
+The detections are mapped to MITRE's ATT&CK for ICS matrix (version 19.2: 12
+tactics, 79 techniques, 18 sub-techniques). Three things come of that.
+
+**Alerts carry the technique.** When content is collected for an ISO or an
+update, each mapped Suricata rule gets its tactic and technique written into
+its metadata, in the four keys the product reads (`mitre_tactic_id`,
+`mitre_tactic_name`, `mitre_technique_id`, `mitre_technique_name`). The product
+turns them into the alert's `threat.tactic.*` and `threat.technique.*` fields
+and adds the tactic to the alert's category. An S7 STOP alert then reads
+Execution, T0858 Change Operating Mode, beside the ACID notices, which carry
+theirs already. An alert carries its rule's first technique and every direct
+one; `td_attack_fit` in the alert's metadata says whether that first technique
+is a direct or a related match (see below), so "Program Download" on a rule
+that only sees a programming function in use is not read as more than it is. The rule files in the repository are not changed; the copies
+are. `ATTACK_ICS_TAGS="false"` in `build.conf` leaves the copies alone too.
+
+**A coverage page shows what is and is not detected.**
+[`docs/ATTACK-ICS-COVERAGE.md`](docs/ATTACK-ICS-COVERAGE.md) covers what is
+kept in this repository. The `images` stage writes the same page for what the
+ISO really ships (imported rule sets included, rules the engine refused left
+out) to `out/attack-ics-coverage.md`, with a table that adds MITRE's
+mitigations for each technique (`.csv`) and a layer file for MITRE's ATT&CK
+Navigator (`attack-ics-layer.json`). All three are copied to
+`~/Malcolm/attack-ics/` on the installed system, with
+`attack-ics-techniques.md`: one line on every technique, how MITRE says it is
+detected and mitigated, for reading where attack.mitre.org cannot be reached.
+
+| Counted | Direct | Related only | None |
+| --- | ---: | ---: | ---: |
+| Detections kept in this repository | 20 | 9 | 50 |
+| With the three imported rule sets that are on by default, and the layer 2 watch accepted | 22 | 13 | 44 |
+
+"Direct" means a detection matches the network operation the technique is
+carried out with; "related" means it matches something that goes with it, or
+a wider operation of which the technique is only one use. Of the 50 with none,
+12 are effects on the plant (loss of view, damage to property) and 24 show
+only in host logs, device alarms or the process itself, which no network
+sensor sees. The remaining 14 (21 with sub-techniques) are listed on the page
+with what each would take.
+
+**A monitor watches for a chain.** The TechDetechtives ATT&CK for ICS Tactic
+Chain Monitor (below) fires when one address appears under three or more ICS
+tactics in 24 hours, for example discovery, then a program download, then a
+stop command. An engineering station doing a planned change does exactly
+that, so expect it during maintenance; outside maintenance it is the alert to
+read first. Events that name a tactic but no technique are not counted,
+because ACID raises one of those for every session set up with a Rockwell or
+Siemens controller.
+
+The mapping is a judgement, kept in four tables in `attack/`, beside the reference:
+
+| File | Holds |
+| --- | --- |
+| `rule-mapping.csv` | This repository's Suricata rules, by signature number |
+| `import-mapping.csv` | Imported rule sets, by source and a pattern in the rule's message |
+| `other-detections.csv` | ACID, the layer 2 watch, YARA rules, indicator matches |
+| `gap-notes.csv` | What it would take to detect each technique that is not covered |
+| `ics-attack.json` | The reference: MITRE's identifiers, names, tactics, data components, mitigations and the first sentence of each description (© The MITRE Corporation, see Licences) |
+
+A new rule needs a row in `rule-mapping.csv`; the tests fail until it has one.
+When MITRE publishes a new version, `tools/attack_ics.py update` rebuilds the
+reference from MITRE's data file, and any row naming a technique that was
+replaced fails with the new identifier in the message. Version 19 replaced
+nine, among them T0855 Unauthorized Command Message (now T1692.001) and T0857
+System Firmware (now T1693.001); older reports use the old numbers.
+
+Limits: a technique with a detection is not a technique that cannot be done
+unseen. Each rule covers one way of doing it on the protocols it understands,
+and no alert says by itself that an operation was unauthorised. The product
+labels tagged Suricata alerts with the framework name "MITRE ATT&CK", without
+"for ICS"; the T0 and TA01 numbers are what mark them as ICS. The layer 2
+watch and YARA matches are mapped on the page but do not carry the technique
+in the alert.
+
 ### Anomaly detectors and correlation monitors
 
 Three detectors for the platform's anomaly detection (it learns each plant's
-own normal, no attack samples needed) and two alert monitors are added to the
+own normal, no attack samples needed) and three alert monitors are added to the
 server. Like the platform's own examples they arrive **switched off**:
 
 | Name | Where | What it flags |
@@ -112,6 +190,7 @@ server. Like the platform's own examples they arrive **switched off**:
 | `techdetechtives_ot_peers` | same | A machine talking industrial protocols to more devices than it usually does |
 | TechDetechtives OT Correlation Alert Monitor | Dashboards > Alerting | Any alert from the correlation rules |
 | TechDetechtives Multi-Signal Host Monitor | same | One address with two or more kinds of evidence in 15 minutes: a rule alert, a threat-indicator match, an ATT&CK technique notice, a file signature hit |
+| TechDetechtives ATT&CK for ICS Tactic Chain Monitor | same | One address seen under three or more ATT&CK for ICS tactics in 24 hours, counting tagged rule alerts and ACID notices |
 
 Start a detector after a week or two of normal traffic has been recorded, so
 it has something to learn from. Enable a monitor and point its action at your
@@ -199,8 +278,9 @@ ot-ids/tools/make-update-bundle.sh /path/to/usb
 ```
 
 This writes `td-update-YYYYMMDD.tar.gz` and a `.sha256` file: the current
-TechDetechtives rules, the enabled external rule sets, YARA rules and
-indicators. Carry both files to the server and to each sensor and run, as the
+TechDetechtives rules (with their ATT&CK for ICS techniques), the enabled
+external rule sets, YARA rules, indicators and the technique reference. Carry
+both files to the server and to each sensor and run, as the
 account that runs the product:
 
 ```bash
@@ -298,6 +378,11 @@ cores and 32+ GB RAM recommended, and as much SSD storage as you can give it.
 
 - `overlay/malcolm/`: anything here is added to `~/Malcolm` on the installed
   system (`suricata/rules/`, `zeek/custom/`, `yara/rules/`, `netbox/preload/`).
+- `attack/` and `tools/attack_ics.py`: the ATT&CK for ICS reference, the
+  mapping tables, and the tool that tags rules and writes the coverage reports.
+- `docs/ATTACK-ICS-COVERAGE.md`, `.csv` and `docs/attack-ics-layer.json`: the
+  coverage of the detections kept in this repository. Generated; the tests
+  fail if they fall behind the tables.
 - `docs/AI-NIDS-REVIEW.md` and `docs/PROJECT-REVIEWS.md`: reviews of six
   outside projects, and what was and was not taken from each.
 - `tests/`: run with `python3 -m unittest discover -s ot-ids/tests -v`, or
@@ -310,8 +395,11 @@ Malcolm is Apache 2.0, Copyright Battelle Energy Alliance, LLC. Keep its
 drops a `techdetechtives-NOTICE.txt` in `~/Malcolm` saying what was changed.
 JA4+ (used by Zeek and Arkime in Malcolm) has its own FoxIO licence; read it
 before selling the product. Each external source keeps its own licence, listed
-in `sources.conf` and in `EXTERNAL-SOURCES.txt` on the installed system. The
-files in this folder are MIT, like the rest of the original work in this
+in `sources.conf` and in `EXTERNAL-SOURCES.txt` on the installed system.
+`attack/ics-attack.json` and the pages made from it reproduce parts of MITRE
+ATT&CK, © 2026 The MITRE Corporation, under MITRE's ATT&CK terms of use; the
+copyright line and the licence are inside each file and must stay there. The
+other files in this folder are MIT, like the rest of the original work in this
 repository. See `NOTICE.md` at the top of the repository. This is not legal
 advice.
 
@@ -319,13 +407,34 @@ advice.
 
 Run and passing in the author's environment (2026-10-06):
 
-- `ot-ids/tests` (32 tests): rule structure and reserved numbers; every flag a
+- `ot-ids/tests` (46 tests): rule structure and reserved numbers; every flag a
   correlation alert waits for is set by a marker; byte-position rules against
   sample UMAS, S7, IEC 104, Modbus, BACnet and TFTP packets, including
   look-alikes that must not match; the nine YARA rules compiled and run by
   YARA 4.5.8 against generated samples; the Snort converter, pruning, indicator
   converter, vulnerability index and source list; the shape of the detectors,
-  monitors and hardening files.
+  monitors and hardening files. For ATT&CK for ICS: every rule in the
+  repository has a row in the mapping, every technique and tactic named exists
+  in the reference, tagging adds only the technique to a rule and does it
+  once, and the coverage files in `docs/` match what the tool writes.
+- Every technique identifier and name in the mapping tables was read from
+  MITRE's data file (attack-stix-data commit `6cda5ad`, ATT&CK for ICS 19.2),
+  not written from memory. Tagging and the coverage report were run on the
+  real ELITEWOLF, Quickdraw and Nmap rule sets: 177 rules given a technique,
+  38 reviewed and left without one, none left unreviewed.
+- A second reviewer, with no part in writing the mapping, checked every row
+  against MITRE's descriptions and the rule bodies, rebuilt the reference
+  from MITRE's file by its own code (no differences) and recounted the
+  figures above. Its findings were applied: mappings that claimed too much
+  were lowered or removed, the tagger was made safe for rules with several
+  metadata options, and two rules were corrected (next point).
+- **Corrected in this version:** the two Schneider UMAS program-transfer rules
+  (1900503, 1900504) had their function numbers the wrong way round since
+  0.10.0, so a program written to a controller was reported as a read-out and
+  the reverse. The public UMAS write-ups name the transfers from the PC's
+  side, the opposite of automation practice. Checked against two public
+  sources (a Wireshark dissector and Digital Bond's transfer module); both
+  rules are now revision 2.
 - The Snort converter on the real ELITEWOLF and Quickdraw rule sets: 110 of 110
   rules converted. The Nmap rule set imported from its repository: 8 rules,
   2 left out on purpose.
@@ -336,7 +445,8 @@ Run and passing in the author's environment (2026-10-06):
 - The `images` stage against a stand-in for Docker that checks each added
   layer's files and destinations and imitates the engine's refusal of a rule.
   The layer 2 watch step with the stand-in accepting it and then refusing it on
-  a later run (the script is removed again).
+  a later run (the script is removed again), and the ATT&CK coverage report
+  following suit (Adversary-in-the-Middle covered, then listed as a gap).
 
 Not run, because the author's environment has no Docker, no Suricata, no Zeek
 and no VM:
@@ -346,6 +456,13 @@ and no VM:
 - No rule has been run against plant traffic. Expect to tune.
 - The anomaly detectors and monitors have not been imported into OpenSearch.
   If one is refused, the others still load and the platform is unaffected.
+- **No tagged alert has been seen in the running product.** That the four
+  metadata keys become the `threat.*` fields was read in Malcolm's Logstash
+  pipeline (`logstash/pipelines/suricata/11_suricata_logs.conf`), and that
+  Suricata accepts any text as metadata was read in its source; neither was
+  watched happening. The Navigator layer has not been opened in Navigator.
+- The mapping is one reviewer's reading of MITRE's descriptions. Nobody else
+  has checked it, and it has not been compared with a real incident.
 - The download of sources outside GitHub (CISA, Snort, abuse.ch) was blocked
   where this was written; the code path is the same as for the tested ones.
 - The layer 2 watch was tested with Zeek 7.0.11 (see `MODIFICATIONS.md`); the
