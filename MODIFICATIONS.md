@@ -91,9 +91,25 @@ Added in 0.5.0. `skills/community/` holds documents copied **unchanged** from th
 
 Added in 0.9.0, 2026-10-05. Original work under `network/`; no upstream code. It reads the platform with the existing read-only key and changes nothing there. The one optional addition on the platform is made by `platform/create-ingest-key.sh --for network`: an API key named `techdetechtives-network-ingest` that can only append to `logs-netmap.*`, through which this part's "change since the baseline" alerts arrive in the data stream `logs-netmap.alerts-techdetechtives`.
 
+## OT IDS
+
+Added in 0.10.0, 2026-10-06, under `ot-ids/`. It does not touch the Security Onion platform or any other part of this repository; it reads `platform/detections/suricata/` and `platform/detections/yara/` and `branding/`.
+
+Changes `ot-ids/build-iso.sh` makes to its build-time copy of Malcolm 26.09.0 (nothing is changed upstream, and the copy is not stored here):
+
+- **Boot menu:** `malcolm-iso/build.sh` is given a product label, so the title and the install entries read "TechDetechtives" and "TechDetechtives Sensor". The boot splash images and the desktop wallpaper are replaced.
+- **Web pages:** the logo, icon and banner image files are replaced by TechDetechtives ones of the same names and sizes. The landing page title, the error page heading and the dashboards title are renamed. The landing page footer gains "TechDetechtives, built on" in front of Malcolm's own version and copyright line, which stay.
+- **Container images:** six of Malcolm's published images (`nginx-proxy`, `dashboards`, `file-upload`, `htadmin`, `filescan`, `dashboards-helper`) each get one added layer holding those image and text files, three anomaly detectors and two alert monitors, and are stored under their original names so Malcolm's own configuration finds them. No program code in any image is changed.
+- **Detection content** placed in the installed system's `~/Malcolm` folders, which Malcolm provides for the purpose: Suricata rules (the shared sets and `ot-ids/detections/suricata/`), YARA rules, Zeek intelligence files, and the converted external rule sets.
+- **Operating system:** added files under `/etc/sysctl.d`, `/etc/modprobe.d`, `/etc/profile.d`, a login banner, four lines appended to Malcolm's `sshd_config`, and two scripts in `/usr/local/bin` (`td-hardening-check`, `td-apply-update`). Malcolm's own hardening is left as it is.
+
+Arkime's and NetBox's own screens, Malcolm's user guide, its setup scripts and its operating-system variant name are not changed.
+
+`ot-ids/docs/AI-NIDS-REVIEW.md` records why the AI-Based-Network-IDS project was reviewed and not adopted.
+
 ## Test status
 
-As of 0.9.0.
+As of 0.10.0.
 
 Confirmed on a live system (Security Onion 2.4.211 standalone, with a second VM; 2026-10-04 and 2026-10-05):
 
@@ -127,7 +143,10 @@ Tested with automated checks or stand-ins:
 - Dashboard and reports pages: rendered with synthetic scan data and checked by eye in light and dark mode and at a narrow width. The severity colours pass an automated check for colour-blind readers.
 - `vulnerability/setup-greenbone.sh`: fetching the pinned setup, the generated override (confirmed with `docker compose config` to publish only port 9443), certificate, secrets and re-runs, with a stand-in for Docker.
 
+- The OT IDS (`ot-ids/tests`, 30 tests): the structure and reserved numbers of its 38 Suricata rules, that every flag a correlation alert waits for is set by a marker rule, its byte-position rules against sample UMAS, S7, IEC 104, Modbus, BACnet and TFTP packets with look-alikes that must not match, its nine YARA rules compiled and run by YARA 4.5.8 against generated samples, and its tools. The Snort converter was run on the real ELITEWOLF and Quickdraw rule sets (110 of 110 converted). `build-iso.sh prepare` and `sources` were run against the real Malcolm 26.09.0 source and the three GitHub-hosted sources; the offline update was built and applied to a mock product folder, including a tampered archive; the `images` stage was run against a stand-in for Docker that checks each added layer's files and destinations.
+
 Not yet tested:
+- The OT IDS has not been built into an ISO, installed or run. None of its rules has been loaded by Suricata or seen plant traffic; the build's `images` stage loads them in the product's own Suricata and writes `out/rule-check.txt`. Its anomaly detectors and monitors have not been imported into OpenSearch, its added image layers have not been built, its hardening files have not been booted, and its downloads from outside GitHub (CISA, Snort, abuse.ch) were blocked where it was written.
 
 - The rule-enable setting on a live platform: that the console accepts the rewritten settings file and switches newly imported local rules on.
 - `platform/apply-overlay.sh rules` against a live detection list (its query was written from the platform's index mapping).

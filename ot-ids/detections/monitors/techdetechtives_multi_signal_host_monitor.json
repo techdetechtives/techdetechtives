@@ -1,0 +1,172 @@
+{
+  "type": "monitor",
+  "name": "TechDetechtives Multi-Signal Host Monitor",
+  "monitor_type": "query_level_monitor",
+  "enabled": false,
+  "schedule": {
+    "period": {
+      "interval": 15,
+      "unit": "MINUTES"
+    }
+  },
+  "inputs": [
+    {
+      "search": {
+        "indices": [
+          "MALCOLM_NETWORK_INDEX_PATTERN_REPLACER"
+        ],
+        "query": {
+          "size": 0,
+          "query": {
+            "bool": {
+              "filter": [
+                {
+                  "range": {
+                    "MALCOLM_NETWORK_INDEX_TIME_FIELD_REPLACER": {
+                      "from": "{{period_end}}||-15m",
+                      "to": "{{period_end}}",
+                      "include_lower": true,
+                      "include_upper": true,
+                      "format": "epoch_millis",
+                      "boost": 1
+                    }
+                  }
+                },
+                {
+                  "exists": {
+                    "field": "source.ip"
+                  }
+                },
+                {
+                  "bool": {
+                    "should": [
+                      {
+                        "term": {
+                          "event.dataset": "alert"
+                        }
+                      },
+                      {
+                        "terms": {
+                          "event.severity_tags": [
+                            "Intelligence",
+                            "MITRE ATT&CK for ICS framework tactic or technique",
+                            "MITRE ATT&CK framework tactic or technique",
+                            "Signature (YARA)",
+                            "Signature (ClamAV)",
+                            "Signature (capa)",
+                            "Signature"
+                          ]
+                        }
+                      }
+                    ],
+                    "minimum_should_match": 1
+                  }
+                }
+              ],
+              "adjust_pure_negative": true,
+              "boost": 1
+            }
+          },
+          "aggregations": {
+            "by_source": {
+              "terms": {
+                "field": "source.ip",
+                "size": 50
+              },
+              "aggregations": {
+                "signature": {
+                  "filter": {
+                    "term": {
+                      "event.dataset": "alert"
+                    }
+                  }
+                },
+                "intelligence": {
+                  "filter": {
+                    "term": {
+                      "event.severity_tags": "Intelligence"
+                    }
+                  }
+                },
+                "attack_technique": {
+                  "filter": {
+                    "terms": {
+                      "event.severity_tags": [
+                        "MITRE ATT&CK for ICS framework tactic or technique",
+                        "MITRE ATT&CK framework tactic or technique"
+                      ]
+                    }
+                  }
+                },
+                "file_signature": {
+                  "filter": {
+                    "terms": {
+                      "event.severity_tags": [
+                        "Signature (YARA)",
+                        "Signature (ClamAV)",
+                        "Signature (capa)",
+                        "Signature"
+                      ]
+                    }
+                  }
+                },
+                "kinds": {
+                  "bucket_script": {
+                    "buckets_path": {
+                      "a": "signature._count",
+                      "b": "intelligence._count",
+                      "c": "attack_technique._count",
+                      "d": "file_signature._count"
+                    },
+                    "script": "(params.a > 0 ? 1 : 0) + (params.b > 0 ? 1 : 0) + (params.c > 0 ? 1 : 0) + (params.d > 0 ? 1 : 0)"
+                  }
+                },
+                "two_or_more_kinds": {
+                  "bucket_selector": {
+                    "buckets_path": {
+                      "k": "kinds"
+                    },
+                    "script": "params.k >= 2"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "query_level_trigger": {
+        "name": "TechDetechtives Multi-Signal Host",
+        "severity": "2",
+        "condition": {
+          "script": {
+            "source": "ctx.results[0].aggregations.by_source.buckets.size() > 0",
+            "lang": "painless"
+          }
+        },
+        "actions": [
+          {
+            "name": "TechDetechtives Multi-Signal Host Action",
+            "destination_id": "malcolm-api-loopback-webhook",
+            "message_template": {
+              "source": "{\n  \"alert\": {\n    \"monitor\": {\n      \"name\": \"{{ctx.monitor.name}}\"\n    },\n    \"trigger\": {\n      \"name\": \"{{ctx.trigger.name}}\",\n      \"severity\": {{ctx.trigger.severity}}\n    },\n    \"period\": {\n      \"start\": \"{{ctx.periodStart}}\",\n      \"end\": \"{{ctx.periodEnd}}\"\n    },\n    \"results\": {{#toJson}}ctx.results{{/toJson}},\n    \"body\": \"{{#toJson}}ctx.payload{{/toJson}}\",\n    \"alert\": \"{{ctx.alert.id}}\",\n    \"error\": \"{{ctx.error}}\"\n  }\n}",
+              "lang": "mustache"
+            },
+            "throttle_enabled": true,
+            "subject_template": {
+              "source": "",
+              "lang": "mustache"
+            },
+            "throttle": {
+              "value": 10,
+              "unit": "MINUTES"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
