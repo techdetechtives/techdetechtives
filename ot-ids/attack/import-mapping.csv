@@ -1,0 +1,46 @@
+# Techniques for imported rule sets (sources.conf), which are not stored in this
+# repository. A rule is matched by the source it came from and a pattern looked
+# for in its message (a regular expression, upper and lower case alike). Every
+# row that matches applies. An imported rule that no row matches is left
+# untagged and listed in the build's coverage report.
+#
+# When a rule matches a "-" row and a technique row, "-" wins: no tag is better than a doubtful one.
+# Among technique rows, the order in this file is the order of the rule's techniques.
+# fit and "-" mean the same as in rule-mapping.csv.
+source,pattern,technique,tactic,fit,why
+nmap-scans,PORT SCAN|SCAN FRAG,T0846.001,TA0102,direct,"Nmap port scan"
+elitewolf,Rockwell Automation URL Path Activity-(?!CSS),T0888,TA0102,related,"The controller's diagnostic web pages (connections, routes, memory) are being read"
+elitewolf,SEL-[0-9A-Z-]+ URL path activity|URL Path Activity-CSS Path|Possible Siemens Web Activity|X509 certificate activity|SEL 2032 Processor|SEL-751A FTP SERVER,-,-,-,"The device's web page, style sheet, certificate or banner was seen: access, not a technique by itself"
+elitewolf,SSH Login Activity|SEL Telnet Activity,T0886,TA0109,related,"A remote login service on the device is in use"
+elitewolf,Firmware Activity,-,-,-,"The rule matches the device's name in a session of the vendor's engineering tool; that firmware is being changed is not shown"
+elitewolf,Access Level \d Change|Access Level Login|FTP Activity - Access Change,T0859,TA0109,related,"A move to a higher access level on the relay, with its password"
+elitewolf,Default Username|Default Password|Password Login otter,T1694.001,TA0109,direct,"The relay's factory account or password is being used"
+elitewolf,FTP Activity - STOR|potential file change,T0836,TA0106,direct,"A settings file is written to the relay"
+elitewolf,FTP Activity - RETR DNPMAP,T0861,TA0100,related,"The relay's DNP3 point map is read off it"
+elitewolf,FTP Activity - RETR (ERR|SET_DNP)|FTP Activity - File Retrieval,T0888,TA0102,related,"Settings and status files are read off the relay"
+elitewolf,FTP Activity - (Change working directory|Current directory),-,-,-,"Moving around the relay's file store; the transfers have their own rules"
+quickdraw,Unauthorized (Read|Write|Miscellaneous) Request|from Unauthorized Client,T0848,TA0108,related,"A request from an address that is not on the sensor's list of masters (MODBUS_CLIENT, DNP3_CLIENT); until that list is set it means little"
+quickdraw,BACnet Foreign Device Join|Register-Foreign-Device NAK,-,-,-,"A device asks to join the BACnet network from another subnet; no ICS technique names that"
+quickdraw,BACnet Read Property Attempt,T0801,TA0100,related,"Reads values from a BACnet device; an operator station does the same all day"
+quickdraw,Read-Foreign-Device-Table|Read-Broadcast-Distribution-Table,T0846,TA0102,related,"Asks a BACnet router which devices and networks it knows"
+quickdraw,DNP3 - Disable Unsolicited Responses,T1691.002,TA0107,direct,"Tells the outstation to stop sending event reports"
+quickdraw,DNP3 - Disable Unsolicited Responses,T0838,TA0107,related,"A change to the outstation's reporting settings"
+quickdraw,DNP3 - Disable Unsolicited Responses,T0878,TA0107,related,"Alarms that travel as unsolicited reports stop with them"
+quickdraw,Non-DNP3 Communication on a DNP3 Port|Non-Modbus Communication on TCP Port 502,T0885,TA0101,direct,"Another protocol on an industrial port"
+quickdraw,Unsolicited Response Storm,T0814,TA0107,related,"A burst of reports can swamp the master; a plant upset produces one too"
+quickdraw,DNP3 - (Cold Restart|Warm Restart),T0816,TA0107,direct,"Restart command"
+quickdraw,Unauthorized Read Request to a PLC,T0801,TA0100,related,"Reads values; unauthorised only if the sensor's client list is set"
+quickdraw,Unauthorized Write Request to a PLC,T1692.001,TA0106,direct,"A write command from an address not listed as a client"
+quickdraw,Unauthorized Miscellaneous Request to a PLC,T1692.001,TA0106,related,"Some other command from an address not listed as a client"
+quickdraw,DNP3 - Stop Application,T0858,TA0104,related,"Stops the outstation's application, as a change to stop mode does"
+quickdraw,DNP3 - Broadcast Request,T1692.001,TA0106,related,"A command sent to every outstation at once"
+quickdraw,Points List Scan,T0861,TA0100,related,"Counts the device's error replies, which is what a scan for its points produces; a misconfigured client produces them too"
+quickdraw,Function Code Scan,T0888,TA0102,related,"A scan for the functions a device supports"
+quickdraw,Request Identity Attempt|Discovery Attempt Via Redpoint|S7 Enumerate|OMRON FINS .* Read Controller Attempt|Read Device Identification|Report Server Information,T0888,TA0102,direct,"Asks the device what it is"
+quickdraw,Force Listen Only Mode,T0814,TA0107,direct,"Listen-only mode stops the device answering"
+quickdraw,Restart Communications Option,T0816,TA0107,direct,"Restarts the device's communications"
+quickdraw,Clear Counters and Diagnostic Registers,T0872,TA0103,related,"Clears the device's own record of communication errors"
+quickdraw,Illegal Packet Size|Incorrect Packet Length,T0814,TA0107,related,"An oversized or wrongly sized message, of the kind that stops some devices"
+quickdraw,Exception Code Delay,T0814,TA0107,related,"The device says it is too busy to answer"
+quickdraw,Download Ladder Logic Started,T0845,TA0100,direct,"Digital Bond names transfers from the PC's side: its download reads the program out of the controller (the rule matches UMAS block read 0x34)"
+quickdraw,Upload Ladder Logic Started,T0843,TA0109,related,"Digital Bond names transfers from the PC's side: its upload writes a program to the controller. The rule matches a check message sent before the transfer"

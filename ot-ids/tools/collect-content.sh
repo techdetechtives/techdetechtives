@@ -12,6 +12,11 @@
 #                     the OT IDS rules (ot-ids/detections/suricata), external rule sets
 #   yara/rules/       the shared and the OT IDS YARA rules
 #   zeek/intel/       your own indicators (ot-ids/iocs) and external threat feeds
+#   attack-ics/       the MITRE ATT&CK for ICS technique reference, to read offline
+#
+# Each rule that ot-ids/attack/ maps to an ATT&CK for ICS technique gets that
+# technique written into its metadata here, in the copy; the rule files in the
+# repository stay as they are. Set ATTACK_ICS_TAGS=false to leave the copies untouched.
 
 set -euo pipefail
 
@@ -56,5 +61,12 @@ if [[ -n "$FETCHED" && -d "$FETCHED" ]]; then
   [[ -d "$FETCHED/zeek/intel" ]] && { mkdir -p "$DEST/zeek/intel"; cp -a "$FETCHED/zeek/intel/." "$DEST/zeek/intel/"; }
   [[ -f "$FETCHED/SOURCES.txt" ]] && cp "$FETCHED/SOURCES.txt" "$DEST/EXTERNAL-SOURCES.txt"
 fi
+
+command -v python3 >/dev/null 2>&1 || { echo "[content] python3 is required" >&2; exit 1; }
+if [[ "${ATTACK_ICS_TAGS:-true}" == "true" ]]; then
+  python3 "$KIT/tools/attack_ics.py" tag "$DEST"
+fi
+mkdir -p "$DEST/attack-ics"
+python3 "$KIT/tools/attack_ics.py" reference -o "$DEST/attack-ics/attack-ics-techniques.md"
 
 echo "[content] $(find "$DEST/suricata/rules" -name '*.rules' | wc -l) rule files, $(find "$DEST/yara/rules" -type f | wc -l) YARA files, $(find "$DEST/zeek/intel" -name '*.intel' 2>/dev/null | wc -l) indicator files in $DEST" >&2

@@ -1,0 +1,63 @@
+# Techniques for detections that are not Suricata rules.
+#
+# kind    zeek-acid   MITRE and CISA's ACID package, which the product loads. Listed as read at
+#                     cisagov/ACID commit 695758d: the operations it has indicators for and
+#                     that are switched on by default. Its notices carry the technique.
+#         zeek-l2     this repository's layer 2 watch (platform/zeek/techdetechtives)
+#         zeek-intel  matches against the threat indicator lists
+#         yara        YARA rules run on files carried over the network
+# tagged  yes when the alert itself carries the technique in the product
+# needs   a path in the content folder that must exist for the detection to count
+#         in a build's report (empty: always there)
+# fit and "-" mean the same as in rule-mapping.csv.
+kind,name,tagged,needs,technique,tactic,fit,why
+zeek-acid,bacnet,yes,,T0801,TA0100,direct,"BACnet subscription to value changes"
+zeek-acid,bacnet,yes,,T0814,TA0107,direct,"BACnet device communication control (silences a device)"
+zeek-acid,bacnet,yes,,T0835,TA0107,related,"BACnet object created or deleted: ACID reports it under this technique; it is not the forcing of inputs and outputs MITRE describes"
+zeek-acid,bacnet,yes,,T0836,TA0106,direct,"BACnet list element added or removed"
+zeek-acid,bacnet,yes,,T0843,TA0109,direct,"BACnet program object told to load"
+zeek-acid,bacnet,yes,,T0845,TA0100,direct,"BACnet file read"
+zeek-acid,bacnet,yes,,T0858,TA0104,direct,"BACnet reinitialize device"
+zeek-acid,bacnet,yes,,T0878,TA0107,direct,"BACnet alarm acknowledged over the network (ACID files it under Impair Process Control)"
+zeek-acid,enip/cip,yes,,T0836,TA0106,direct,"CIP parameter change on Rockwell controllers"
+zeek-acid,enip/cip,yes,,T0843,TA0109,direct,"CIP program download on Rockwell controllers"
+zeek-acid,enip/cip,yes,,T0858,TA0104,direct,"CIP mode change on Rockwell controllers"
+zeek-acid,enip/cip forcing,no,,T0835,TA0107,direct,"I/O forcing. The notice names the tactic (as Impair Process Control) but no technique"
+zeek-acid,s7comm,yes,,T0836,TA0106,direct,"S7 modify variable"
+zeek-acid,s7comm,yes,,T0843,TA0109,direct,"S7 request download"
+zeek-acid,s7comm,yes,,T0845,TA0100,direct,"S7 start upload"
+zeek-acid,s7comm,yes,,T0858,TA0104,direct,"S7 mode transition"
+zeek-acid,s7comm forcing,no,,T0835,TA0107,direct,"I/O forcing. The notice names the tactic (as Impair Process Control) but no technique"
+zeek-acid,enip/cip handshake,no,,-,-,-,"Raised as Privilege Escalation when a session to a Rockwell controller is set up; names no technique"
+zeek-acid,s7comm handshake,no,,-,-,-,"Raised as Privilege Escalation on every S7 connection setup; names no technique"
+zeek-l2,Address_Claimed_By_Two_Cards,no,zeek/custom/techdetechtives/l2-watch.zeek,T0830,TA0100,direct,"ARP poisoning: two network cards answer for one address"
+zeek-l2,Address_Taken_Over,no,zeek/custom/techdetechtives/l2-watch.zeek,T0830,TA0100,direct,"ARP poisoning: an address moves to another network card"
+zeek-l2,Card_Answers_For_Many_Addresses,no,zeek/custom/techdetechtives/l2-watch.zeek,T0830,TA0100,direct,"ARP poisoning: one network card answers for many addresses"
+zeek-l2,ARP_Reply_Burst,no,zeek/custom/techdetechtives/l2-watch.zeek,T0830,TA0100,related,"Unasked ARP replies in a burst, as poisoning tools send"
+zeek-l2,Address_Has_New_Card,no,zeek/custom/techdetechtives/l2-watch.zeek,-,-,-,"A replaced device looks the same; context for the other layer 2 notices"
+zeek-l2,ARP_Request_Flood,no,zeek/custom/techdetechtives/l2-watch.zeek,T0846,TA0102,related,"ARP requests for many addresses: a sweep of the subnet"
+zeek-l2,Many_New_Cards,no,zeek/custom/techdetechtives/l2-watch.zeek,T0814,TA0107,related,"A flood of made-up card addresses fills a switch's table; it is also how an intruder makes a switch send everything to every port"
+zeek-l2,Software_Set_Card_Address,no,zeek/custom/techdetechtives/l2-watch.zeek,-,-,-,"A software-set address is common on virtual machines; context only"
+zeek-intel,indicator match,no,,T0869,TA0101,related,"Contact with an address or name on a threat list; which protocol carried it varies"
+yara,TechDetechtives_OT_Triton_Framework_Files,no,,T0867,TA0109,direct,"Attack tooling carried over the network"
+yara,TechDetechtives_OT_Attack_Framework_SCADA_Modules,no,,T0867,TA0109,direct,"Attack tooling carried over the network"
+yara,TechDetechtives_OT_Script_Stops_Or_Reprograms_Controller,no,,T0867,TA0109,direct,"A script that commands controllers, carried over the network"
+yara,TechDetechtives_OT_Script_Stops_Or_Reprograms_Controller,no,,T0853,TA0104,related,"The script itself is seen, not its use"
+yara,TechDetechtives_OT_Scan_Script_Names_Industrial_Probes,no,,T0867,TA0109,direct,"Scanning scripts carried over the network"
+yara,TechDetechtives_OT_Exploitation_Framework_Names,no,,T0867,TA0109,direct,"Attack tooling carried over the network"
+yara,TechDetechtives_OT_Industroyer_Component_Names,no,,T0867,TA0109,direct,"Malware components carried over the network"
+yara,TechDetechtives_OT_Stuxnet_File_Names,no,,T0867,TA0109,direct,"Malware components carried over the network"
+yara,TechDetechtives_Program_Exports_ReflectiveLoader,no,,T0867,TA0109,related,"A loader of the kind attack frameworks use, carried over the network"
+yara,TechDetechtives_Credential_Tool_Mimikatz_Text,no,,T0867,TA0109,related,"A credential tool carried over the network; credential theft itself is not in the ICS matrix"
+yara,TechDetechtives_PowerShell_Download_And_Run,no,,T0853,TA0104,related,"A script is seen in transit, not its use"
+yara,TechDetechtives_PowerShell_Encoded_Launcher,no,,T0853,TA0104,related,"A script is seen in transit, not its use"
+yara,TechDetechtives_Script_Base64_Decode_And_Invoke,no,,T0853,TA0104,related,"A script is seen in transit, not its use"
+yara,TechDetechtives_Script_Runs_Command_Through_WScript_Shell,no,,T0853,TA0104,related,"A script is seen in transit, not its use"
+yara,TechDetechtives_Script_Disables_AMSI,no,,T0853,TA0104,related,"A script is seen in transit, not its use"
+yara,TechDetechtives_Shortcut_Starts_Script_Interpreter,no,,T0863,TA0104,related,"A shortcut made to run a script when a person opens it"
+yara,TechDetechtives_Webshell_Request_Driven_Execution,no,,-,-,-,"Web shells are an IT technique (ATT&CK Enterprise); the ICS matrix has none for them"
+yara,TechDetechtives_OT_Controller_Program_PLCopen_XML,no,,-,-,-,"A controller program file crossing the network: worth knowing, not a technique by itself"
+yara,TechDetechtives_OT_Controller_Program_Rockwell_Export,no,,-,-,-,"A controller program file crossing the network: worth knowing, not a technique by itself"
+yara,TechDetechtives_OT_Controller_Program_Schneider_Export,no,,-,-,-,"A controller program file crossing the network: worth knowing, not a technique by itself"
+yara,TechDetechtives_OT_Controller_Program_Source_Text,no,,-,-,-,"A controller program file crossing the network: worth knowing, not a technique by itself"
+yara,TechDetechtives_OT_Substation_Configuration_IEC61850,no,,-,-,-,"A substation configuration file crossing the network: worth knowing, not a technique by itself"

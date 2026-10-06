@@ -2,7 +2,7 @@
 # TechDetechtives OT IDS. Copyright (c) 2026 TechDetechtives. MIT licence.
 #
 # Apply an offline update made by ot-ids/tools/make-update-bundle.sh: rules,
-# YARA rules and threat indicators. Run as the account that runs the product
+# YARA rules, threat indicators and the ATT&CK for ICS technique reference. Run as the account that runs the product
 # (not root), on the server and on each sensor:
 #
 #   td-apply-update /media/usb/td-update-20261006.tar.gz
@@ -40,7 +40,7 @@ if [[ -f "$LIST" ]]; then
   done < "$LIST"
 fi
 : > "$LIST.new"
-for part in suricata/rules yara/rules zeek/intel; do
+for part in suricata/rules yara/rules zeek/intel attack-ics; do
   [[ -d "$TOP/$part" ]] || continue
   (cd "$TOP" && find "$part" -type f | sort) | while IFS= read -r file; do
     mkdir -p "$DIR/$(dirname "$file")"
