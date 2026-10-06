@@ -2,6 +2,9 @@
 # TechDetechtives OT IDS. Copyright (c) 2026 TechDetechtives. MIT licence (see LICENSE).
 """Convert Snort 2.x rules into rules Suricata can load.
 
+Suricata rules from outside can be passed through it too: they come out
+unchanged apart from the new sid, the rate limit and the options below.
+
 Most Snort 2 rules load in Suricata unchanged. The ones that do not usually
 fail for one of four reasons, and this tool deals with each:
 
@@ -119,7 +122,7 @@ def fix_variables(field, known, fallback, notes):
     return re.sub(r"\$([A-Za-z0-9_]+)", swap, field)
 
 
-def convert_rule(line, new_sid, source, limit_seconds=0):
+def convert_rule(line, new_sid, source, limit_seconds=0, once_per_window=False, skip_sids=()):
     """Return (converted rule or None, reason it was set aside or None, notes)."""
     notes = set()
     match = HEADER.match(line)
@@ -169,6 +172,15 @@ def convert_rule(line, new_sid, source, limit_seconds=0):
         options.append(option)
     if original_sid is None:
         return None, "no sid", notes
+    if original_sid in skip_sids:
+        return None, "left out on purpose (skip_sids)", notes
+    if once_per_window:
+        # "type threshold" alerts on every Nth match, so one scan raises dozens of
+        # alerts. "type both" raises one per window once the count is reached.
+        for index, option in enumerate(options):
+            if option.lower().startswith("threshold") and re.search(r"type\s+threshold\b", option):
+                options[index] = re.sub(r"type\s+threshold\b", "type both", option)
+                notes.add("threshold changed from every Nth match to once per window")
     if not any(option.lower().startswith("msg") for option in options):
         return None, "no msg", notes
     if modbus:
@@ -187,14 +199,14 @@ def convert_rule(line, new_sid, source, limit_seconds=0):
     return rule, None, notes
 
 
-def convert_text(text, source, sid_base, limit_seconds=0):
+def convert_text(text, source, sid_base, limit_seconds=0, once_per_window=False, skip_sids=()):
     """Convert every rule in text. Returns (rules, set_aside, notes_by_sid)."""
     rules, set_aside, noted = [], [], {}
     next_sid = sid_base
     for line in logical_lines(text):
         if not re.match(r"^(alert|drop|sdrop|reject|log|pass)\s", line):
             continue
-        rule, reason, notes = convert_rule(line, next_sid, source, limit_seconds)
+        rule, reason, notes = convert_rule(line, next_sid, source, limit_seconds, once_per_window, set(skip_sids))
         if rule is None:
             set_aside.append((reason, line))
             continue
@@ -213,14 +225,18 @@ def main():
     parser.add_argument("--licence", default="", help="licence of the source, written in the file header")
     parser.add_argument("--limit-seconds", type=int, default=0,
                         help="give rules that have no rate limit one alert per source address per this many seconds")
+    parser.add_argument("--once-per-window", action="store_true",
+                        help="turn 'type threshold' (an alert every Nth match) into 'type both' (one alert per window)")
+    parser.add_argument("--skip-sids", default="", help="comma-separated original sids to leave out")
     parser.add_argument("-o", "--output", required=True, type=Path)
     parser.add_argument("--report", type=Path, help="write what was changed and set aside to this file")
     args = parser.parse_args()
 
     text = "\n".join(path.read_text(encoding="utf-8", errors="replace") for path in args.inputs)
-    rules, set_aside, noted = convert_text(text, args.name, args.sid_base, args.limit_seconds)
+    skip = [item.strip() for item in args.skip_sids.split(",") if item.strip()]
+    rules, set_aside, noted = convert_text(text, args.name, args.sid_base, args.limit_seconds, args.once_per_window, skip)
     header = [
-        f"# Converted from Snort rules by tools/snort2suricata.py. Source: {args.name}.",
+        f"# Imported and renumbered by tools/snort2suricata.py. Source: {args.name}.",
         f"# Licence of the source: {args.licence or 'see the source'}.",
         f"# {len(rules)} rules, sids {args.sid_base} to {args.sid_base + max(len(rules) - 1, 0)}; "
         f"{len(set_aside)} set aside (see the conversion report).",
