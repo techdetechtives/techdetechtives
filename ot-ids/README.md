@@ -87,9 +87,17 @@ sensor to see traffic at the network edge.
 
 Zeek's side comes with Malcolm: the ICSNPP parsers decode the industrial
 protocols into searchable records, and ACID raises MITRE ATT&CK for ICS notices
-on EtherNet/IP, S7 and BACnet behaviour. No Zeek scripts are added here: a
-script that fails to load stops Zeek, and this build has no way to run Zeek
-before the ISO exists.
+on EtherNet/IP, S7 and BACnet behaviour.
+
+**Layer 2 watch.** One Zeek script is added: `platform/zeek/techdetechtives/`,
+which raises a notice for ARP poisoning, an address taken over by another
+network card, MAC flooding and ARP sweeps (see "Layer 2" in
+`docs/DETECTION-COVERAGE.md` for its settings and limits). A script Zeek cannot
+load stops Zeek, so the `images` stage first has the product's own Zeek parse
+it, and adds it only if that succeeds; `out/rule-check.txt` says which
+happened. The notices appear in the Notices dashboard. The sensor must receive
+the ARP traffic of the segment it watches. `ZEEK_L2_WATCH="false"` leaves it
+out.
 
 ### Anomaly detectors and correlation monitors
 
@@ -118,6 +126,7 @@ repository; the build downloads the enabled ones.
 | --- | --- | --- | --- |
 | `elitewolf` | yes | NSA ELITEWOLF: 52 Snort rules for activity on Rockwell, SEL and Siemens device interfaces | CC0 |
 | `quickdraw` | yes | Digital Bond Quickdraw: 58 Snort rules for BACnet, DNP3, EtherNet/IP, Modbus, Modicon, Fox, FINS and S7 | MIT |
+| `nmap-scans` | yes | Aleksi Bovellan's Nmap scan detection: 8 Suricata rules for SYN, connect, ACK, Xmas, fragmented and UDP scans (two blunt port-4444 rules left out; one alert per window) | MIT |
 | `snort-community` | no | Snort community rules: Windows, Linux and server-software exploits | GPL-2.0 |
 | `stamus-lateral`, `hunting-rules`, `pt-open` | no | Suricata rule sets for lateral movement, hunting, and named vulnerabilities | GPL-3.0 / custom |
 
@@ -289,8 +298,8 @@ cores and 32+ GB RAM recommended, and as much SSD storage as you can give it.
 
 - `overlay/malcolm/`: anything here is added to `~/Malcolm` on the installed
   system (`suricata/rules/`, `zeek/custom/`, `yara/rules/`, `netbox/preload/`).
-- `docs/AI-NIDS-REVIEW.md`: a review of the AI-Based-Network-IDS project and
-  what was and was not taken from it.
+- `docs/AI-NIDS-REVIEW.md` and `docs/PROJECT-REVIEWS.md`: reviews of six
+  outside projects, and what was and was not taken from each.
 - `tests/`: run with `python3 -m unittest discover -s ot-ids/tests -v`, or
   through `scripts/verify.sh repo`.
 
@@ -310,7 +319,7 @@ advice.
 
 Run and passing in the author's environment (2026-10-06):
 
-- `ot-ids/tests` (30 tests): rule structure and reserved numbers; every flag a
+- `ot-ids/tests` (32 tests): rule structure and reserved numbers; every flag a
   correlation alert waits for is set by a marker; byte-position rules against
   sample UMAS, S7, IEC 104, Modbus, BACnet and TFTP packets, including
   look-alikes that must not match; the nine YARA rules compiled and run by
@@ -318,13 +327,16 @@ Run and passing in the author's environment (2026-10-06):
   converter, vulnerability index and source list; the shape of the detectors,
   monitors and hardening files.
 - The Snort converter on the real ELITEWOLF and Quickdraw rule sets: 110 of 110
-  rules converted.
+  rules converted. The Nmap rule set imported from its repository: 8 rules,
+  2 left out on purpose.
 - `prepare` and `sources` against the real Malcolm v26.09.0 source and the
   three GitHub-hosted sources.
 - `tools/make-update-bundle.sh`, and `td-apply-update` against a mock product
   folder: install, re-install with a stale file, and a tampered archive.
 - The `images` stage against a stand-in for Docker that checks each added
   layer's files and destinations and imitates the engine's refusal of a rule.
+  The layer 2 watch step with the stand-in accepting it and then refusing it on
+  a later run (the script is removed again).
 
 Not run, because the author's environment has no Docker, no Suricata, no Zeek
 and no VM:
@@ -336,6 +348,8 @@ and no VM:
   If one is refused, the others still load and the platform is unaffected.
 - The download of sources outside GitHub (CISA, Snort, abuse.ch) was blocked
   where this was written; the code path is the same as for the tested ones.
+- The layer 2 watch was tested with Zeek 7.0.11 (see `MODIFICATIONS.md`); the
+  product ships Zeek 8.2.2, which has not parsed it yet. The build decides.
 - The hardening files have not been booted. `td-hardening-check` reports what
   took effect.
 - The image downloads, the added image layers, the legacy-BIOS splash

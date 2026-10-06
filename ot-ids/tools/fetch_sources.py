@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ioc2intel          # noqa: E402
 import snort2suricata     # noqa: E402
 
-KINDS = ("snort-git", "snort-url", "suricata-url", "intel-git", "ioc-url", "kev-url")
+KINDS = ("snort-git", "snort-url", "suricata-git", "suricata-url", "intel-git", "ioc-url", "kev-url")
 MAX_DOWNLOAD = 300 * 1024 * 1024
 
 
@@ -101,14 +101,14 @@ def fetch_one(name, section, out):
     rules_dir, intel_dir, reports = out / "suricata" / "rules", out / "zeek" / "intel" / name, out / "reports"
     detail = ""
 
-    if kind in ("snort-git", "intel-git"):
+    if kind in ("snort-git", "suricata-git", "intel-git"):
         with tempfile.TemporaryDirectory() as folder:
             commit = git_fetch(url, section.get("commit", ""), folder)
             wanted = names(section.get("files", ""))
             found = [path for pattern in wanted for path in sorted(Path(folder).glob(pattern)) if path.is_file()]
             if not found:
                 raise SourceError(f"none of the listed files exist in the repository: {wanted}")
-            if kind == "snort-git":
+            if kind in ("snort-git", "suricata-git"):
                 text = "\n".join(path.read_text(encoding="utf-8", errors="replace") for path in found)
                 detail = convert_snort(name, text, section, rules_dir, reports, licence)
             else:
@@ -158,12 +158,13 @@ def convert_snort(name, text, section, rules_dir, reports, licence):
     except (KeyError, ValueError) as error:
         raise SourceError("a Snort source needs a numeric sid_base") from error
     limit = int(section.get("limit_seconds", "0") or 0)
-    rules, set_aside, noted = snort2suricata.convert_text(text, name, sid_base, limit)
+    rules, set_aside, noted = snort2suricata.convert_text(
+        text, name, sid_base, limit, section.getboolean("once_per_window", fallback=False), names(section.get("skip_sids", "")))
     if not rules:
         raise SourceError("no rule could be converted")
     rules_dir.mkdir(parents=True, exist_ok=True)
     reports.mkdir(parents=True, exist_ok=True)
-    header = [f"# Converted from Snort rules by tools/snort2suricata.py. Source: {name}.",
+    header = [f"# Imported and renumbered by tools/snort2suricata.py. Source: {name}.",
               f"# Licence of the source: {licence or 'see the source'}.",
               f"# {len(rules)} rules, sids {sid_base} to {sid_base + len(rules) - 1}; {len(set_aside)} set aside.", ""]
     (rules_dir / f"ext-{name}.rules").write_text("\n".join(header + rules) + "\n", encoding="utf-8")
@@ -171,7 +172,7 @@ def convert_snort(name, text, section, rules_dir, reports, licence):
     report += [f"sid {sid}: {'; '.join(notes)}" for sid, notes in sorted(noted.items())]
     report += [f"SET ASIDE ({reason}): {line[:200]}" for reason, line in set_aside]
     (reports / f"{name}.txt").write_text("\n".join(report) + "\n", encoding="utf-8")
-    return f"{len(rules)} rules converted, {len(set_aside)} set aside"
+    return f"{len(rules)} rules imported, {len(set_aside)} set aside"
 
 
 def main():

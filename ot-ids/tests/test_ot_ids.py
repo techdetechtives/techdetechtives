@@ -388,6 +388,35 @@ class SnortConversion(unittest.TestCase):
         self.assertTrue(all(line.endswith(";)") for line in self.rules))
 
 
+class SuricataImport(unittest.TestCase):
+    """Suricata rules from outside pass through the same tool: new numbers, a
+    rate limit, optionally one alert per window, and a list of rules to leave out."""
+
+    SOURCE = "\n".join([
+        'alert tcp any any -> any ![22,80] (msg:"POSSBL PORT SCAN (NMAP -sS)"; flow:to_server,stateless; flags:S; window:1024; tcp.mss:1460; threshold:type threshold, track by_src, count 7, seconds 135; classtype:attempted-recon; sid:3400002; priority:2; rev:11;)',
+        'alert ip any any -> any any (msg:"POSSBL SCAN FRAG (NMAP -f)"; fragbits:M+D; threshold:type limit, track by_src, count 3, seconds 1210; classtype:attempted-recon; sid:3400006; rev:6;)',
+        'alert tcp any ![22,80] -> any 4444 (msg:"POSSBL SCAN SHELL M-SPLOIT TCP"; classtype:trojan-activity; sid:3400020; priority:1; rev:2;)',
+        'alert udp any any -> any 4444 (msg:"every packet"; sid:3400021; rev:2;)',
+    ])
+
+    def test_once_per_window_skip_and_limit(self):
+        rules, set_aside, _ = snort2suricata.convert_text(self.SOURCE, "nmap", 1912000, 300, True, ["3400020"])
+        self.assertEqual(len(rules), 3)
+        self.assertEqual([reason for reason, _ in set_aside], ["left out on purpose (skip_sids)"])
+        self.assertIn("threshold:type both, track by_src, count 7, seconds 135;", rules[0])
+        self.assertIn("tcp.mss:1460;", rules[0])
+        self.assertTrue(rules[0].startswith("alert tcp any any -> any ![22,80] ("))
+        self.assertIn("threshold:type limit, track by_src, count 3, seconds 1210;", rules[1], "a limit is left as it is")
+        self.assertIn("threshold: type limit, track by_src, count 1, seconds 300;", rules[2], "no limit of its own: one is added")
+        self.assertEqual([re.search(r"sid:(\d+);\)$", line).group(1) for line in rules], ["1912000", "1912001", "1912002"])
+
+    def test_unchanged_without_the_options(self):
+        rules, set_aside, _ = snort2suricata.convert_text(self.SOURCE, "nmap", 1912000)
+        self.assertEqual((len(rules), len(set_aside)), (4, 0))
+        self.assertIn("threshold:type threshold, track by_src, count 7, seconds 135;", rules[0])
+        self.assertNotIn("threshold", rules[3])
+
+
 class EngineOutputPruning(unittest.TestCase):
     LOG = ('Error: detect: error parsing signature "alert tcp any any -> any any (bad;)" from file /opt/suricata/rules/ext-a.rules at line 3\n'
            '[ERRCODE: SC_ERR_INVALID_SIGNATURE(39)] - error parsing signature "x" from file /opt/suricata/rules/ext-b.rules at line 1\n')
@@ -465,21 +494,21 @@ class SourceList(unittest.TestCase):
         for name in config.sections():
             section = config[name]
             self.assertRegex(name, r"^[a-z0-9-]+$")
-            self.assertIn(section["kind"], ("snort-git", "snort-url", "suricata-url", "intel-git", "ioc-url", "kev-url"), name)
+            self.assertIn(section["kind"], ("snort-git", "snort-url", "suricata-git", "suricata-url", "intel-git", "ioc-url", "kev-url"), name)
             self.assertTrue(section["url"].startswith("https://"), name)
             self.assertTrue(section.get("licence"), f"{name}: state the licence")
             self.assertTrue(section.get("about"), name)
-            if section["kind"].startswith("snort"):
+            if section["kind"] in ("snort-git", "snort-url", "suricata-git"):
                 base = int(section["sid_base"])
                 self.assertGreaterEqual(base, 1910000, f"{name}: 1900001-1900999 is the TechDetechtives range")
                 bases.append(base)
-            if section["kind"] in ("snort-git",):
+            if section["kind"] in ("snort-git", "suricata-git"):
                 self.assertRegex(section.get("commit", ""), r"^[0-9a-f]{40}$", f"{name}: pin rule repositories to a commit")
             if section.getboolean("enabled"):
                 enabled.append(name)
         self.assertEqual(len(bases), len(set(bases)))
         self.assertTrue(all(abs(a - b) >= 1000 for a in bases for b in bases if a != b), "leave 1000 numbers per source")
-        self.assertEqual(enabled, ["elitewolf", "quickdraw", "public-threat-feeds", "cisa-kev"],
+        self.assertEqual(enabled, ["elitewolf", "quickdraw", "nmap-scans", "public-threat-feeds", "cisa-kev"],
                          "sources under the GPL or custom terms stay off unless the owner turns them on")
 
 

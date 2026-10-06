@@ -31,6 +31,7 @@ INCLUDE_IMAGES="${INCLUDE_IMAGES:-true}"           # true = air-gap ready ISO (m
 BRAND_WEB="${BRAND_WEB:-true}"                     # true = logo and name in the web applications too
 BUILD_MODE="${BUILD_MODE:-auto}"                   # auto | vagrant | native (native = Debian 13 host)
 FETCH_SOURCES="${FETCH_SOURCES:-true}"             # true = download the sources enabled in sources.conf
+ZEEK_L2_WATCH="${ZEEK_L2_WATCH:-true}"             # true = add the layer 2 (ARP) watch if the product's Zeek accepts it
 HARDENING="${HARDENING:-true}"                     # true = add the files under hardening/ to the ISO
 HARDEN_SHELL_TIMEOUT="${HARDEN_SHELL_TIMEOUT:-900}"        # seconds before an idle SSH/console shell closes; 0 = never
 HARDEN_USB_STORAGE_OFF="${HARDEN_USB_STORAGE_OFF:-false}"  # true = block USB sticks (also blocks updates by USB)
@@ -329,6 +330,45 @@ check_rules_with_engine() {
   done
 }
 
+# The layer 2 watch (platform/zeek/techdetechtives: ARP poisoning, an address
+# taken over by another network card, MAC flooding, ARP sweeps) is a Zeek
+# script. A script Zeek cannot load stops Zeek, and with it every traffic
+# record, so it goes into the ISO only after the product's own Zeek has parsed
+# it. In every other case (no Docker, no image, a parse error) it is left out.
+add_zeek_scripts() {
+  local src="${SHARED_ZEEK_DIR:-$KIT_DIR/../platform/zeek/techdetechtives}" dest="$SKEL_DEST/zeek/custom" report="$OUT_DIR/rule-check.txt" img
+  mkdir -p "$OUT_DIR"
+  rm -rf "$dest/techdetechtives"
+  [[ -f "$dest/__load__.zeek" ]] && sed -i '/^@load \.\/techdetechtives$/d' "$dest/__load__.zeek"
+  [[ "$ZEEK_L2_WATCH" == "true" ]] || return 0
+  if [[ ! -f "$src/l2-watch.zeek" || ! -f "$src/__load__.zeek" ]]; then
+    warn "Layer 2 watch not added: $src not found."
+    return 0
+  fi
+  if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+    warn "Layer 2 watch NOT added: Docker is not available to check it with the product's Zeek."
+    echo "Layer 2 watch (Zeek): not added, Docker was not available to check it." >> "$report"
+    return 0
+  fi
+  img="$(list_images malcolm | grep '/zeek:' | head -1 || true)"
+  if [[ -z "$img" ]] || ! { docker image inspect "$img" >/dev/null 2>&1 || docker pull "$img" >/dev/null 2>&1; }; then
+    warn "Layer 2 watch NOT added: the Zeek image could not be obtained to check it."
+    echo "Layer 2 watch (Zeek): not added, the Zeek image could not be obtained." >> "$report"
+    return 0
+  fi
+  if docker run --rm --entrypoint /usr/local/zeek/bin/zeek -v "$src":/kit-zeek/techdetechtives:ro "$img" \
+       --parse-only /kit-zeek/techdetechtives > "$WORK_DIR/zeek-test.log" 2>&1; then
+    mkdir -p "$dest/techdetechtives"
+    cp "$src/l2-watch.zeek" "$src/__load__.zeek" "$dest/techdetechtives/"
+    echo "@load ./techdetechtives" >> "$dest/__load__.zeek"
+    log "Layer 2 watch added: $img parsed it without error."
+    echo "Layer 2 watch (Zeek): added, parsed without error by $img." >> "$report"
+  else
+    warn "Layer 2 watch NOT added: the product's Zeek refused it. See $report"
+    { echo "Layer 2 watch (Zeek): NOT added, $img refused it:"; tail -15 "$WORK_DIR/zeek-test.log" | sed 's/^/    /'; } >> "$report"
+  fi
+}
+
 # List which CVEs the rules going into the ISO can recognise: the rule set
 # bundled in the Suricata image (ET Open) plus everything this kit adds.
 coverage_report() {
@@ -469,6 +509,7 @@ cmd_images() {
     log "INCLUDE_IMAGES is not 'true'; the ISO will need Internet at first start to pull images."
     warn "Web branding, anomaly detectors and alert monitors travel inside the embedded images, so with INCLUDE_IMAGES=false the installed system will not have them."
     check_rules_with_engine
+    add_zeek_scripts
     coverage_report
     return 0
   fi
@@ -495,6 +536,7 @@ cmd_images() {
     mv "$out.partial" "$out"
   done
   check_rules_with_engine
+  add_zeek_scripts
   coverage_report
 }
 
