@@ -44,9 +44,9 @@ Expect well over an hour. Settings are in `build.conf`.
 
 | Stage | What it does |
 | --- | --- |
-| `./build-iso.sh prepare` | Clones the pinned Malcolm release; applies name, logo and artwork; adds the detection content (with each rule's ATT&CK for ICS technique) and the hardening files |
-| `./build-iso.sh sources` | Downloads the rule sets and threat feeds enabled in `sources.conf`, converts them, adds them |
-| `./build-iso.sh images` | Pulls the container images, adds the branded and detection layers, packs them; checks every rule with the product's own Suricata; writes the vulnerability and ATT&CK for ICS coverage reports |
+| `./build-iso.sh prepare` | Clones the pinned Malcolm release; applies name, logo and artwork; adds the detection content (with each rule's ATT&CK for ICS technique), the Suricata settings and the hardening files |
+| `./build-iso.sh sources` | Downloads the rule sets, YARA rule sets and threat feeds enabled in `sources.conf`, converts them, adds them |
+| `./build-iso.sh images` | Pulls the container images, adds the branded and detection layers, packs them; checks every rule with the product's own Suricata and compiles the YARA rules with its own file scanner; writes the vulnerability and ATT&CK for ICS coverage reports |
 | `./build-iso.sh iso` | Runs the live-build and writes the ISOs to `out/` |
 
 Run `prepare` again after changing `build.conf`, `overlay/`, `detections/`,
@@ -57,7 +57,9 @@ Reports in `out/`:
 
 - `rule-check.txt`: the engine's verdict on each rule file, and any rule it
   refused. Refused rules are commented out (`#PRUNED`) in the ISO, not dropped
-  silently.
+  silently. Also here: how many YARA rules the file scanner's image came with
+  and how many it compiles from the ISO's files, and how many of Suricata's
+  own Modbus, DNP3 and EtherNet/IP event rules are active in its image.
 - `vulnerability-coverage.csv` and `.md`: see "Vulnerability coverage" below.
 - `attack-ics-coverage.md`, `.csv` and `attack-ics-layer.json`: see "MITRE
   ATT&CK for ICS" below.
@@ -86,6 +88,29 @@ laptop or a busy master can cross them: raise the count or suppress that
 address, do not switch the rule off. The two correlation chains need `HOME_NET`
 set to your own address ranges (`./scripts/configure`), and chain 2 needs the
 sensor to see traffic at the network edge.
+
+**Quieting a rule for one address.** On the installed system,
+`~/Malcolm/suricata/include-configs/td-threshold.config` holds commented
+examples: suppress one rule for one address or range, or limit a talkative rule
+to one alert an hour. Copy a line, remove the `#`, put in the rule's number and
+your addresses, and restart the product on the server and each sensor. Nothing
+is suppressed as shipped. A `threshold` line there replaces the rate a rule
+sets for itself, so for a rule that counts before it alerts, write the count
+you want it to have.
+
+**Three rules were rewritten in 0.13.0.** Rules 1900103, 1900406 and 1900451
+(Modbus Read Device Identification, alone, repeated, and as the first step of
+correlation chain 1) used a decoder option that Suricata compares for one
+other function only, so they loaded and never fired. They now match the
+request's bytes on port 502. See fault 1 in
+[`docs/LISTED-REPOSITORIES-REVIEW.md`](docs/LISTED-REPOSITORIES-REVIEW.md).
+
+### Suricata settings the build changes
+
+| Setting | What it does | In `build.conf` |
+| --- | --- | --- |
+| Stream depth 0 | The product stops Suricata's decoders 1 MB into each connection. A master's connection lasts days, so every decoder-based rule went blind on it. Now each connection is read to its end, at the price of more work on large transfers. | `SURICATA_STREAM_DEPTH` |
+| Suricata's own protocol event rules | A Modbus, DNP3 or EtherNet/IP message that breaks its protocol: a length that does not add up, a read of more registers than the protocol allows, an answer nobody asked for, a flood of unanswered requests. The product's image is built in a way that probably leaves the 16 Modbus and DNP3 rules commented out and the 2 EtherNet/IP rules absent; the build says what it found in `out/rule-check.txt` and switches them on. On a link that loses packets, rule 2250002 will fire: quiet it in the file above. | `SURICATA_PROTOCOL_EVENTS` |
 
 Zeek's side comes with Malcolm: the ICSNPP parsers decode the industrial
 protocols into searchable records, and ACID raises MITRE ATT&CK for ICS notices
@@ -235,10 +260,45 @@ Sixteen anomaly-detection projects were read before this was written. None
 could be used as it was; seven ideas from four of them are in it. See
 [`docs/ANOMALY-DETECTION-REVIEW.md`](docs/ANOMALY-DETECTION-REVIEW.md).
 
+### Traffic profile: what else is on the control network
+
+The baseline watches the industrial protocols. `baseline/td_profile.py`
+reports on everything else, when you ask: one search over the connection
+records the sensors already stored, one report, no alerts, nothing kept. On
+the server:
+
+```bash
+td-profile                              # the last 24 whole hours
+td-profile --hours 72 --top 25
+td-profile --format markdown > profile.md
+td-profile --format csv > conversations.csv     # every conversation, one per line
+```
+
+| List | What it shows |
+| --- | --- |
+| Other protocols reaching controllers | Traffic that is not industrial, answered, to an address the baseline knows as a device: remote desktop, web pages, file sharing |
+| Connections opened by controllers | A device that starts conversations of its own. Time and name lookups are usual; little else is |
+| Addresses outside the private ranges | One end is a public address. In an isolated network there should be none |
+| Longest connections | One connection open an hour or more, including those still open and those that began before the period |
+| Largest transfers | By bytes, with the direction |
+| Steady repeaters | New connections in three hours out of four, at an even rate (needs a period of four hours or more) |
+| Addresses that contacted many services | One address, many destinations and ports: an inventory tool, or a scan |
+| Attempts nobody answered | The client sent and the server sent no data back |
+| Services | Each port and protocol, with how many servers offer it and how many clients use it |
+
+A period holds every connection that was open at some time in it; one that
+began earlier and ended in the period is counted whole. Masters and devices are
+named from the baseline's list, so the first two lists are empty until the
+baseline has learned something. A steady repeater is time
+synchronisation or a monitoring agent far more often than a program calling
+home; the report cannot tell which, it only makes sure someone has seen the
+list. The measures are the ones RITA reports; none of RITA's code is used
+([`docs/LISTED-REPOSITORIES-REVIEW.md`](docs/LISTED-REPOSITORIES-REVIEW.md)).
+
 ### Anomaly detectors and correlation monitors
 
 Three detectors for the platform's anomaly detection (it learns each plant's
-own normal, no attack samples needed) and three alert monitors are added to the
+own normal, no attack samples needed) and four alert monitors are added to the
 server. Like the platform's own examples they arrive **switched off**:
 
 | Name | Where | What it flags |
@@ -249,10 +309,55 @@ server. Like the platform's own examples they arrive **switched off**:
 | TechDetechtives OT Correlation Alert Monitor | Dashboards > Alerting | Any alert from the correlation rules |
 | TechDetechtives Multi-Signal Host Monitor | same | One address with two or more kinds of evidence in 15 minutes: a rule alert, a threat-indicator match, an ATT&CK technique notice, a file signature hit |
 | TechDetechtives ATT&CK for ICS Tactic Chain Monitor | same | One address seen under three or more ATT&CK for ICS tactics in 24 hours, counting tagged rule alerts and ACID notices |
+| TechDetechtives DNP3 Outstation Trouble Monitor | same | An outstation whose answers carry "Device Trouble", "Configuration Corrupt", "Event Buffer Overflow" or "Digital Outputs in Local" (a restart is rule 1900132) |
 
 Start a detector after a week or two of normal traffic has been recorded, so
 it has something to learn from. Enable a monitor and point its action at your
 own notification channel (e-mail, webhook).
+
+### File-scanning rules (YARA)
+
+Files taken from the traffic are scanned with YARA, among other engines. The
+product is built with nine public rule repositories for that. **Until 0.13.0
+this kit's own 21 rules replaced them on an installed system instead of adding
+to them**: the scanner compiles its rules again at each start from the files in
+`~/Malcolm/yara/rules`, and with no Internet that folder was all it had (fault
+3 in [`docs/LISTED-REPOSITORIES-REVIEW.md`](docs/LISTED-REPOSITORIES-REVIEW.md)).
+
+The build now fetches the same nine repositories and puts their rule files in
+that folder beside the kit's own:
+
+| Source in `sources.conf` | On by default | Rules fetched | Licence |
+| --- | --- | ---: | --- |
+| `yara-signature-base` (Florian Roth) | yes | 5,579 | Detection Rule License 1.1; 13 files that state a non-commercial licence and 2 that name the GPL are left out |
+| `yara-elastic` | yes | 3,069 | Elastic License 2.0: not an open-source licence, read it before you pass the product on |
+| `yara-reversinglabs` | yes | 1,240 | MIT |
+| `yara-sekoia` | yes | 791 | Detection Rule License 1.1 |
+| `yara-atr` (Trellix) | yes | 167 | Apache-2.0 |
+| `yara-volexity`, `yara-bartblaze`, `yara-eset` | yes | 149, 143, 138 | BSD-2-Clause, MIT, BSD-2-Clause |
+| `yara-cape` (CAPE Sandbox; also one of the product's nine) | no | 224 | GPL-3.0 |
+| `yara-rules-legacy` (Yara-Rules/rules, last changed 2022) | no | 1,125 after filtering | GPL-2.0 |
+
+With the defaults the scanner compiles 10,656 rules at start, which takes about
+a minute on the server (measured with the product's own script and YARA 4.5.8;
+`out/rule-check.txt` has the figure from the product's own image after a
+build). By a simulation of the product's own build that is about 340 fewer than
+the product is built with: CAPE's rules and the files left out for their
+licence. Each source is pinned to a commit;
+delete a `commit` line to take that source's newest rules. Each source's
+licence file is copied beside its rules.
+
+**YARA rules go in together or not at all.** If a YARA source that is switched
+on cannot be fetched, or `FETCH_SOURCES="false"`, no YARA rule goes into the
+ISO, this kit's own included, and the product keeps the set it was built with;
+the build says so. A part of the rules would silently replace the whole. To
+add YARA rules of your own, put them in `overlay/malcolm/yara/rules/` under
+file names nobody else uses; they need the sources above for the same reason.
+
+If the server has Internet access and you switch the product's own rule
+updates on (`RULES_UPDATE_ENABLED`), it fetches the nine repositories itself:
+turn the `yara-*` sources off then, or every rule is compiled and matches
+twice.
 
 ### External rule sets, including Snort rules
 
@@ -274,6 +379,16 @@ original stays in the rule's metadata), limits rules with no rate limit of
 their own to one alert per address per five minutes, and sets aside what
 Suricata cannot express, with the reason. The engine check in the `images`
 stage then comments out anything Suricata still refuses.
+
+**Snort 3 rules** that keep the classic header are converted where the change
+is mechanical: content options with their modifiers after commas,
+`dnp3_obj: group N, var M`, single-value `cip_class`, `cip_instance`,
+`cip_attribute` and `cip_status`, and `iec104_asdu_func`, which becomes a byte
+match because Suricata has no IEC 104 decoder. Set aside with the reason:
+Snort 3 rules with no addresses in the header, rules that need Snort 3's
+S7CommPlus, MMS or OPC UA inspectors, and rules that name a buffer the Snort 3
+way (`http_uri;` before the content it applies to), which Suricata would read
+the other way round.
 
 To add a Snort or Suricata rule set of your own, add a section to
 `sources.conf` (web address or git repository), or convert a file by hand:
@@ -319,8 +434,9 @@ this kit ships or imports, and writes `out/vulnerability-coverage.csv` (one row
 per CVE and rule, with a platform guess: windows, linux, ot or other) and a
 summary. With the `cisa-kev` source on, the summary also says how many of
 CISA's known-exploited vulnerabilities are covered and lists the known-exploited
-industrial ones that are not. Both files are copied to `~/Malcolm/` on the
-installed system.
+industrial ones that are not, each with the date it entered the catalogue and
+whether the catalogue says ransomware campaigns use it. Both files are copied
+to `~/Malcolm/` on the installed system.
 
 For a vendor whose protocols are closed (Honeywell Experion, Yokogawa, parts of
 ABB and Emerson) coverage will be thin. The shared OT rules explain what is
@@ -337,7 +453,14 @@ ot-ids/tools/make-update-bundle.sh /path/to/usb
 
 This writes `td-update-YYYYMMDD.tar.gz` and a `.sha256` file: the current
 TechDetechtives rules (with their ATT&CK for ICS techniques), the enabled
-external rule sets, YARA rules, indicators and the technique reference. Carry
+external rule sets, the YARA rule sets, indicators and the technique reference.
+A system installed from a version before 0.13.0 scans files with this kit's 21
+YARA rules alone; applying an update made with this version gives it the
+product's rule sets back. If a YARA source cannot be fetched, no bundle is
+written. A bundle carries rules, YARA rules and indicators only: the stream
+depth, the protocol event rules and the suppression file reach an installed
+system with a new ISO, or by hand (`docs/LISTED-REPOSITORIES-REVIEW.md`,
+fault 3, says how). Carry
 both files to the server and to each sensor and run, as the
 account that runs the product:
 
@@ -404,8 +527,9 @@ user guide is Malcolm's, unchanged. The setup scripts and the OS variant name
 still say Malcolm or Hedgehog. The landing page footer reads "TechDetechtives,
 built on Malcolm ... (c) Battelle Energy Alliance, LLC"; keep that attribution.
 
-Web branding, the anomaly detectors and the monitors live in thin layers added
-on top of six official images and stored under the official image names. They
+Web branding, the anomaly detectors, the monitors, the baseline and profile
+programs and the protocol event rules live in thin layers added on top of
+seven official images and stored under the official image names. They
 need `INCLUDE_IMAGES="true"` (the default), and running `docker compose pull`
 on an installed system replaces those images with the plain upstream ones.
 
@@ -442,10 +566,16 @@ cores and 32+ GB RAM recommended, and as much SSD storage as you can give it.
   coverage of the detections kept in this repository. Generated; the tests
   fail if they fall behind the tables.
 - `baseline/td_baseline.py`: the baseline program; `attack/baseline-findings.csv`
-  maps its findings to ATT&CK for ICS.
-- `docs/AI-NIDS-REVIEW.md`, `docs/PROJECT-REVIEWS.md` and
-  `docs/ANOMALY-DETECTION-REVIEW.md`: reviews of 22 outside projects, and what
-  was and was not taken from each.
+  maps its findings to ATT&CK for ICS. `baseline/td_profile.py`: the traffic
+  profile.
+- `tools/yara_sources.py`: lays out external YARA rule files so the product
+  compiles them (`check FOLDER` compiles them with the yarac on your machine).
+  `tools/protocol_events.py`: says which of Suricata's own industrial event
+  rules a rule file has active, and switches them on.
+- `docs/AI-NIDS-REVIEW.md`, `docs/PROJECT-REVIEWS.md`,
+  `docs/ANOMALY-DETECTION-REVIEW.md` and `docs/LISTED-REPOSITORIES-REVIEW.md`:
+  reviews of 40 outside projects (two could not be fetched), and what was and
+  was not taken from each.
 - `tests/`: run with `python3 -m unittest discover -s ot-ids/tests -v`, or
   through `scripts/verify.sh repo`.
 
@@ -456,7 +586,10 @@ Malcolm is Apache 2.0, Copyright Battelle Energy Alliance, LLC. Keep its
 drops a `techdetechtives-NOTICE.txt` in `~/Malcolm` saying what was changed.
 JA4+ (used by Zeek and Arkime in Malcolm) has its own FoxIO licence; read it
 before selling the product. Each external source keeps its own licence, listed
-in `sources.conf` and in `EXTERNAL-SOURCES.txt` on the installed system.
+in `sources.conf` and in `EXTERNAL-SOURCES.txt` on the installed system; the
+YARA rule sets carry their licence files with them, and one of those that are
+on by default, Elastic's, is under the Elastic License 2.0, which is not an
+open-source licence.
 `attack/ics-attack.json` and the pages made from it reproduce parts of MITRE
 ATT&CK, © 2026 The MITRE Corporation, under MITRE's ATT&CK terms of use; the
 copyright line and the licence are inside each file and must stay there. The
@@ -466,19 +599,47 @@ advice.
 
 ## Test status
 
-Run and passing in the author's environment (2026-10-06):
+Run and passing in the author's environment (2026-10-07):
 
-- `ot-ids/tests` (100 tests): rule structure and reserved numbers; every flag a
+- `ot-ids/tests` (152 tests): rule structure and reserved numbers; every flag a
   correlation alert waits for is set by a marker; byte-position rules against
   sample UMAS, S7, IEC 104, Modbus, BACnet and TFTP packets, including
   look-alikes that must not match; the nine YARA rules compiled and run by
-  YARA 4.5.8 against generated samples; the Snort converter, pruning, indicator
-  converter, vulnerability index and source list; the shape of the detectors,
-  monitors and hardening files. For ATT&CK for ICS: every rule in the
+  YARA 4.5.8 against generated samples; the Snort converter (Snort 2 and the
+  Snort 3 forms it takes), pruning, indicator converter, vulnerability index
+  and source list; the YARA source handling, on awkward rule text and on a
+  repository made for the test; the protocol-event tool; the build's settings
+  helper; the shape of the detectors, monitors, suppression file and hardening
+  files. For ATT&CK for ICS: every rule in the
   repository has a row in the mapping, every technique and tactic named exists
   in the reference, tagging adds only the technique to a rule and does it
   once, and the coverage files in `docs/` match what the tool writes.
-- The baseline program (54 of the 100 tests) against a stand-in for the
+- **New in 0.13.0, measured with the product's own script.** All ten YARA
+  sources were fetched from GitHub. Malcolm's start-up script
+  (`strelka/backend/yara_rules_setup.sh`, unchanged but for one temporary-file
+  path) was run with YARA 4.5.8 over this kit's rule files alone and replaced a
+  stand-in compiled set with 21 rules: the fault. Run over the kit's files and
+  the eight default sources it compiled 3,155 of 3,173 files into 10,656 rules
+  in about a minute; with the two optional sources, 3,665 of 3,691 files and
+  11,979 rules. Neither set hit any of 7,407 ordinary files of a Linux machine.
+  The namespace this kit computes for each file agreed with the script's for
+  every file.
+- The traffic profile (28 of the 152 tests) against a stand-in for OpenSearch
+  that answers its one search from connection records held in memory: each
+  list, connections that began before the period, connections still open, a
+  search that fails or answers in part, more records than one report takes,
+  hostile text, every output format.
+- The Snort 3 conversions; the table of 67 IEC 104 type names was compared with
+  Snort 3's source by program. The protocol-event tool against Suricata 8.0's
+  own rule files (18 of 18 rules added to an empty file).
+- An independent review of the 0.13.0 work confirmed the four faults, the byte
+  positions, that the stream-depth setting reaches the engine, the YARA
+  numbers, the suppression file's line forms and the DNP3 monitor's field
+  names against the sources, and made eleven findings against the first
+  version; all are corrected
+  ([`docs/LISTED-REPOSITORIES-REVIEW.md`](docs/LISTED-REPOSITORIES-REVIEW.md),
+  last section).
+- The baseline program (54 of the 152 tests) against a stand-in for the
   product: a small web server that works out the one OpenSearch search the
   program makes from records held in memory, and takes alerts the way the
   product's webhook does. Learning, each kind of finding, late records, a
@@ -511,11 +672,17 @@ Run and passing in the author's environment (2026-10-06):
   rules converted. The Nmap rule set imported from its repository: 8 rules,
   2 left out on purpose.
 - `prepare` and `sources` against the real Malcolm v26.09.0 source and the
-  three GitHub-hosted sources.
+  twelve GitHub-hosted sources that are on by default (three rule sets, the
+  threat feeds, eight YARA sets); the stream-depth line was read back from the
+  prepared `config/suricata.env.example`.
 - `tools/make-update-bundle.sh`, and `td-apply-update` against a mock product
   folder: install, re-install with a stale file, and a tampered archive.
 - The `images` stage against a stand-in for Docker that checks each added
-  layer's files and destinations and imitates the engine's refusal of a rule.
+  layer's files and destinations and imitates the engine's refusal of a rule,
+  the file scanner's answer and the Suricata image's rule file. The script the
+  YARA check runs inside the product's image was also run here, with its paths
+  pointed at a copy, against the product's real script: a broken file, and a
+  compile that fails.
   The layer 2 watch step with the stand-in accepting it and then refusing it on
   a later run (the script is removed again), and the ATT&CK coverage report
   following suit (Adversary-in-the-Middle covered, then listed as a gap).
@@ -524,7 +691,23 @@ Not run, because the author's environment has no Docker, no Suricata, no Zeek
 and no VM:
 
 - **No rule here has been loaded by Suricata.** The `images` stage does that on
-  your build host; read `out/rule-check.txt` afterwards.
+  your build host; read `out/rule-check.txt` afterwards. That includes the
+  three rules rewritten in 0.13.0.
+- **Nothing added in 0.13.0 has run in the product.** Not seen: Suricata with
+  stream depth 0, or reading the suppression file; the layer on the Suricata
+  image, and what that image's rule file really holds (worked out from three
+  sources; the build reads it back and reports); the product's file scanner
+  compiling the fetched YARA rules (its YARA is 4.5.5 with two more modules, so
+  its counts will differ a little from the ones above; the build runs the
+  product's own script in its own image and reports); the traffic profile
+  against a real OpenSearch (run `td-profile --hours 1` first: an error names
+  what OpenSearch refused); the DNP3 monitor being imported.
+- The count of ordinary files hit by the YARA rule sets is a rough measure from
+  one Linux machine, with few Windows programs and Office documents on it.
+  Rules that are quiet there can still be noisy on files from a plant.
+- Whether one Modbus request can count twice toward rule 1900406's "ten in a
+  minute", once on the packet and once on the reassembled stream, was not
+  established.
 - No rule has been run against plant traffic. Expect to tune.
 - The anomaly detectors and monitors have not been imported into OpenSearch.
   If one is refused, the others still load and the platform is unaffected.

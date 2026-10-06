@@ -153,10 +153,15 @@ product's source.
   own notes show the price: an operator dragging a slider raised about twenty
   alerts.
 
-Looked at and already covered: a read of more registers than the protocol
-allows, and a Write Single Coil with an invalid value (otforge, Cyber04-08).
-Suricata's own Modbus decoder raises "invalid value" for both, in its bundled
-protocol-event rules (signature numbers 2250001 to 2250009).
+Looked at and covered by Suricata itself: a read of more registers than the
+protocol allows, and a Write Single Coil with an invalid value (otforge,
+Cyber04-08). Suricata's own Modbus decoder raises "invalid value" for both, and
+ships a rule for it (signature numbers 2250001 to 2250009).
+
+*Correction, 0.13.0:* this page first called those "already covered" without
+checking that the rules were switched on in the product. They probably were
+not. The build now checks and switches them on; see fault 4 in
+`LISTED-REPOSITORIES-REVIEW.md`.
 
 ## Limits of this review
 

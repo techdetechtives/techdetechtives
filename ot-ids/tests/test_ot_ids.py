@@ -36,9 +36,12 @@ sys.path.insert(0, str(KIT / "tools"))
 
 import attack_ics         # noqa: E402
 import cve_index          # noqa: E402
+import fetch_sources      # noqa: E402
 import ioc2intel          # noqa: E402
+import protocol_events    # noqa: E402
 import prune_rules        # noqa: E402
 import snort2suricata     # noqa: E402
+import yara_sources       # noqa: E402
 
 
 def rule_lines(folder):
@@ -53,7 +56,7 @@ SHARED = rule_lines(ROOT / "platform" / "detections" / "suricata")
 
 
 def rule(sid):
-    for _, _, line in RULES:
+    for _, _, line in RULES + SHARED:
         if f"sid:{sid};" in line:
             return line
     raise AssertionError(f"no rule with sid {sid}")
@@ -158,6 +161,13 @@ class SuricataStructure(unittest.TestCase):
             if line.startswith("alert dnp3"):
                 self.assertRegex(line, r"dnp3_ind:[a-z_]+;", f"{name}:{number}")
 
+    def test_modbus_subfunction_is_only_written_for_function_8(self):
+        # Suricata compares "subfunction" for the Diagnostics function only (8.0,
+        # rust/src/modbus/detect.rs). With any other function the rule loads and never matches.
+        for name, number, line in RULES + SHARED:
+            for function in re.findall(r"modbus: (?:unit \d+, )?function (\d+), subfunction \d+", line):
+                self.assertEqual(function, "8", f"{name}:{number}: 'subfunction' never matches function {function}")
+
     def test_rate_rules_count_at_a_rate_above_ordinary_traffic(self):
         for name, number, line in RULES:
             if name != "techdetechtives-ot-behavior.rules":
@@ -232,6 +242,24 @@ class SuricataBytePositions(unittest.TestCase):
         self.check({1900501: ([umas["stop"]], others("stop")), 1900502: ([umas["start"]], others("start")),
                     1900503: ([umas["download"]], others("download")), 1900504: ([umas["upload"]], others("upload")),
                     1900505: ([umas["reserve"]], others("reserve")), 1900467: ([umas["stop"]], others("stop"))})
+
+    def test_modbus_device_identification(self):
+        # Function 43 (0x2B), interface type 14 (0x0E): Read Device Identification.
+        identify = self.modbus(0x2B, b"\x0e\x01\x00")
+        self.assertEqual((identify[2:4], identify[7], identify[8]), (b"\x00\x00", 0x2B, 0x0E))
+        canopen = self.modbus(0x2B, b"\x0d\x00\x00\x00\x00")           # same function, CANopen interface
+        refused = self.modbus(0xAB, b"\x01")                              # a device refusing function 43
+        diagnostics = self.modbus(0x08, b"\x00\x04\x00\x00")
+        read = self.modbus(0x03, b"\x2b\x0e\x00\x02")                   # the two bytes as a register address
+        other_unit = self.modbus(0x2B, b"\x0e\x01\x00", unit=0x2B, transaction=0x2B0E)
+        not_modbus = b"\x00\x01\x12\x34\x00\x05\x01\x2b\x0e\x01\x00"     # protocol identifier is not zero
+        others = [canopen, refused, diagnostics, read, not_modbus]
+        if SHARED:
+            self.check({1900103: ([identify, other_unit], others)})
+        self.check({1900406: ([identify, other_unit], others), 1900451: ([identify, other_unit], others)})
+        for sid in ([1900103] if SHARED else []) + [1900406, 1900451]:
+            self.assertRegex(rule(sid), r"^alert tcp any any -> any 502 \(", sid)
+            self.assertIn("flow:established,to_server;", rule(sid), sid)
 
     def test_s7(self):
         stop = self.s7(0x01, b"\x29\x00\x00\x00\x00\x00\x09P_PROGRAM")
@@ -371,7 +399,7 @@ class SnortConversion(unittest.TestCase):
     def test_counts(self):
         self.assertEqual(len(self.rules), 6)
         self.assertEqual(sorted(reason.split(",")[0].split("(")[0].strip() for reason, _ in self.set_aside),
-                         ["not a Snort 2 rule header", "pass rule", "uses 'modbus_data'"])
+                         ["Snort 3 rule with no addresses in its header", "pass rule", "uses 'modbus_data'"])
 
     def test_numbers_are_new_unique_and_the_original_is_kept(self):
         sids = [re.search(r"sid:(\d+);\)$", line).group(1) for line in self.rules]
@@ -394,6 +422,78 @@ class SnortConversion(unittest.TestCase):
         for line in self.rules:
             self.assertEqual(line.count("threshold:"), 1)
         self.assertTrue(all(line.endswith(";)") for line in self.rules))
+
+
+class Snort3Conversion(unittest.TestCase):
+    """Snort 3 rules that keep the classic header: the mechanical part is converted, the rest set aside with the reason."""
+
+    SOURCE = "\n".join([
+        'alert tcp any any -> any 20000 ( msg:"modifiers after commas"; flow:to_server,established; content:"|05 64|", depth 2; '
+        'content:"a,b\\"c", distance 4, within 10, nocase, fast_pattern; service:dnp3; rem:"x"; sid:1; )',
+        'alert tcp any any -> any 20000 ( msg:"dnp3 object"; dnp3_func:operate; dnp3_obj:group 12, var 1; sid:2; )',
+        'alert tcp any any -> any 44818 ( msg:"cip"; cip_service:78; cip_class:6; cip_instance:1; cip_attribute:3; cip_status:0; sid:3; )',
+        'alert tcp any any -> any 2404 ( msg:"iec104 single command"; flow:to_server; iec104_asdu_func:C_SC_NA_1; sid:4; )',
+        'alert tcp any any -> any 2404 ( msg:"iec104 lower case"; iec104_asdu_func:c_rp_na_1; sid:5; )',
+        'alert tcp any any -> any 102 ( msg:"s7commplus"; s7commplus_func:explore; sid:6; )',
+        'alert tcp any any -> any 102 ( msg:"mms"; mms_func:5; sid:7; )',
+        'alert tcp any any -> any 4840 ( msg:"opcua"; opcua_msg_type:MSG; sid:8; )',
+        'alert tcp any any -> any 2404 ( msg:"apci"; iec104_apci_type:unnumbered_control_function; sid:9; )',
+        'alert tcp any any -> any 44818 ( msg:"cip range"; cip_class:<10; sid:10; )',
+        'alert tcp any any -> any 80 ( msg:"unknown modifier"; content:"x", width 16; sid:11; )',
+        'alert udp any any -> any 2404 ( msg:"iec104 over udp"; iec104_asdu_func:C_SC_NA_1; sid:12; )',
+        'alert tcp any any -> any 2404 ( msg:"iec104 unknown"; iec104_asdu_func:X_YZ_NA_1; sid:13; )',
+        'alert tcp any any -> any 20000 ( msg:"dnp3 odd"; dnp3_obj:group 12; sid:14; )',
+        'alert tcp any any -> any 20000 ( msg:"dnp3 as suricata writes it"; dnp3_obj:12,1; sid:15; )',
+        'alert modbus ( msg:"service rule"; modbus_func:5; sid:16; )',
+        # Snort 3 names a buffer before the content it applies to; Suricata reads the same word as applying to the content before it.
+        'alert tcp any any -> any 80 ( msg:"sticky after comma content"; content:"GET", depth 3; http_uri; content:"/admin", nocase; sid:17; )',
+        'alert tcp any any -> any 80 ( msg:"sticky first"; flow:to_server; http_uri; content:"/admin"; sid:18; )',
+        'alert tcp any any -> any 80 ( msg:"sticky with service"; content:"/admin"; http_uri; service:http; sid:19; )',
+        # The Snort 2 form, a modifier after its content, is left as it is.
+        'alert tcp any any -> any 80 ( msg:"snort 2 modifier"; content:"/admin"; nocase; http_uri; content:"x"; http_header; sid:20; )',
+    ])
+
+    def setUp(self):
+        self.rules, self.set_aside, self.noted = snort2suricata.convert_text(self.SOURCE, "unit3", 1995000)
+
+    def by_message(self, text):
+        return next(line for line in self.rules if f'msg:"{text}"' in line)
+
+    def test_what_is_converted_and_what_is_set_aside(self):
+        self.assertEqual(len(self.rules), 7)
+        reasons = sorted(reason for reason, _ in self.set_aside)
+        self.assertEqual(len(reasons), 13)
+        self.assertEqual(sum("the Snort 3 way" in reason for reason in reasons), 3)
+        self.assertIn('content:"/admin"; nocase; http_uri; content:"x"; http_header;', self.by_message("snort 2 modifier"))
+        for wanted in ("S7CommPlus", "MMS (IEC 61850)", "OPC UA", "IEC 104 frame types", "is a range", "content modifier 'width 16'",
+                       "not a tcp rule", "not 'group N, var M'", "no addresses in its header"):
+            self.assertTrue(any(wanted in reason for reason in reasons), f"{wanted}: {reasons}")
+
+    def test_content_modifiers(self):
+        line = self.by_message("modifiers after commas")
+        self.assertIn('content:"|05 64|"; depth:2; content:"a,b\\"c"; distance:4; within:10; nocase; fast_pattern;', line)
+        self.assertNotIn("service", line.split("msg:")[1].split(";", 1)[1])
+        self.assertNotIn("rem:", line)
+
+    def test_decoder_keywords(self):
+        self.assertIn("dnp3_func:operate; dnp3_obj:12,1;", self.by_message("dnp3 object"))
+        self.assertIn("dnp3_obj:12,1;", self.by_message("dnp3 as suricata writes it"))
+        self.assertIn("cip_service:78; enip.cip_class:6; enip.cip_instance:1; enip.cip_attribute:3; enip.cip_status:0;", self.by_message("cip"))
+
+    def test_iec104_types_become_the_bytes_the_kits_own_rules_use(self):
+        single = self.by_message("iec104 single command")
+        self.assertIn('content:"|68|"; depth:1; byte_test:1,!&,1,2; content:"|2d|"; offset:6; depth:1;', single)
+        self.assertIn('content:"|69|"; offset:6; depth:1;', self.by_message("iec104 lower case"))
+        # the same bytes as the kit's own Reset Process rule, and a real command matches them
+        own = next(line for _, _, line in SHARED if "sid:1900161;" in line) if SHARED else None
+        if own:
+            self.assertIn('content:"|68|"; depth:1; byte_test:1,!&,1,2; content:"|69|"; offset:6; depth:1;', own)
+        command = SuricataBytePositions.iec104(0x2D)
+        self.assertTrue(payload_matches(single, command))
+        self.assertFalse(payload_matches(single, SuricataBytePositions.iec104(0x2E)))
+        self.assertFalse(payload_matches(single, bytes.fromhex("680401002d00")))          # a supervisory frame is not a command
+        self.assertEqual(len(snort2suricata.IEC104_TYPES), 67)
+        self.assertEqual((snort2suricata.IEC104_TYPES["c_cs_na_1"], snort2suricata.IEC104_TYPES["f_sc_nb_1"]), (103, 127))
 
 
 class SuricataImport(unittest.TestCase):
@@ -477,8 +577,11 @@ class VulnerabilityIndex(unittest.TestCase):
             self.assertEqual(sorted((cve, sid, platform) for cve, sid, _, _, platform in rows),
                              [("CVE-2017-0144", "2", "windows"), ("CVE-2019-10929", "3", "ot"), ("CVE-2021-44228", "1", "linux")])
             (folder / "kev.json").write_text(json.dumps({"vulnerabilities": [
-                {"cveID": "CVE-2021-44228", "vendorProject": "Apache", "product": "Log4j2", "dateAdded": "2021-12-10"},
-                {"cveID": "CVE-2023-0001", "vendorProject": "Rockwell Automation", "product": "ControlLogix", "dateAdded": "2023-01-01"}]}))
+                {"cveID": "CVE-2021-44228", "vendorProject": "Apache", "product": "Log4j2", "dateAdded": "2021-12-10",
+                 "knownRansomwareCampaignUse": "Known"},
+                {"cveID": "CVE-2023-0001", "vendorProject": "Rockwell Automation", "product": "ControlLogix", "dateAdded": "2023-01-01",
+                 "knownRansomwareCampaignUse": "Unknown"},
+                {"cveID": "CVE-2020-0002", "vendorProject": "Moxa", "product": "EDR", "dateAdded": "2022-03-03"}]}))
             sys.argv = ["cve_index.py", "--rules", str(folder), "--kev", str(folder / "kev.json"),
                         "-o", str(folder / "out.csv"), "--summary", str(folder / "out.md")]
             self.assertEqual(cve_index.main(), 0)
@@ -489,7 +592,12 @@ class VulnerabilityIndex(unittest.TestCase):
             summary = (folder / "out.md").read_text()
             self.assertIn("Distinct CVEs covered: 3", summary)
             self.assertIn("covered by at least one rule: 1", summary)
-            self.assertIn("| CVE-2023-0001 | Rockwell Automation | ControlLogix |", summary)
+            self.assertIn("| CVE-2023-0001 | Rockwell Automation | ControlLogix | 2023-01-01 | Unknown |", summary)
+            self.assertIn("| CVE-2020-0002 | Moxa | EDR | 2022-03-03 | not stated |", summary)
+            self.assertIn("used by ransomware campaigns: 1, of which covered: 1", summary)
+            log4j = next(row for row in table if row["cve"] == "CVE-2021-44228")
+            self.assertEqual((log4j["kev_date_added"], log4j["kev_ransomware_use"]), ("2021-12-10", "Known"))
+            self.assertEqual(next(row for row in table if row["cve"] == "CVE-2017-0144")["kev_ransomware_use"], "")
             self.assertIn("does not block", summary)
 
 
@@ -502,7 +610,7 @@ class SourceList(unittest.TestCase):
         for name in config.sections():
             section = config[name]
             self.assertRegex(name, r"^[a-z0-9-]+$")
-            self.assertIn(section["kind"], ("snort-git", "snort-url", "suricata-git", "suricata-url", "intel-git", "ioc-url", "kev-url"), name)
+            self.assertIn(section["kind"], fetch_sources.KINDS, name)
             self.assertTrue(section["url"].startswith("https://"), name)
             self.assertTrue(section.get("licence"), f"{name}: state the licence")
             self.assertTrue(section.get("about"), name)
@@ -510,14 +618,265 @@ class SourceList(unittest.TestCase):
                 base = int(section["sid_base"])
                 self.assertGreaterEqual(base, 1910000, f"{name}: 1900001-1900999 is the TechDetechtives range")
                 bases.append(base)
-            if section["kind"] in ("snort-git", "suricata-git"):
+            if section["kind"] in ("snort-git", "suricata-git", "yara-git"):
                 self.assertRegex(section.get("commit", ""), r"^[0-9a-f]{40}$", f"{name}: pin rule repositories to a commit")
+            if section["kind"] == "yara-git":
+                self.assertTrue(name.startswith("yara-"), f"{name}: the name becomes the folder and the start of every file name")
+                self.assertTrue(section.get("drop_known") is None or name == "yara-rules-legacy", name)
             if section.getboolean("enabled"):
                 enabled.append(name)
         self.assertEqual(len(bases), len(set(bases)))
         self.assertTrue(all(abs(a - b) >= 1000 for a in bases for b in bases if a != b), "leave 1000 numbers per source")
-        self.assertEqual(enabled, ["elitewolf", "quickdraw", "nmap-scans", "public-threat-feeds", "cisa-kev"],
+        bundled = ["yara-signature-base", "yara-elastic", "yara-reversinglabs", "yara-sekoia", "yara-atr", "yara-bartblaze",
+                   "yara-eset", "yara-volexity"]
+        self.assertEqual(enabled, ["elitewolf", "quickdraw", "nmap-scans", "public-threat-feeds"] + bundled + ["cisa-kev"],
                          "sources under the GPL or custom terms stay off unless the owner turns them on")
+        for name in config.sections():
+            if config[name]["licence"].startswith(("GPL", "AGPL", "LGPL")):
+                self.assertFalse(config[name].getboolean("enabled"), f"{name}: GPL content is the owner's choice")
+        # The legacy collection is listed after the sets it is compared with, or drop_known has nothing to compare.
+        order = config.sections()
+        self.assertTrue(all(order.index(name) < order.index("yara-rules-legacy") for name in bundled + ["yara-cape"]))
+
+
+class YaraSources(unittest.TestCase):
+    """Rule files from outside repositories, named so the product's start-up compile accepts them."""
+
+    FIRST = 'rule Alpha : tag {\n  strings:\n    $a = "rule Hidden {"\n  condition:\n    $a\n}\n'
+    SECOND = '/*\nrule Commented { condition: true }\n*/\nprivate rule Helper { condition: true }\nrule Beta { condition: Helper }\n'
+
+    def test_namespace_is_the_one_the_product_gives(self):
+        # Checked on 2026-10-06 against Malcolm 26.09.0's strelka/backend/yara_rules_setup.sh, run over
+        # 3,667 fetched files: every namespace agreed. These are the shapes that matter.
+        for name, expected in (("techdetechtives_ot.yar", "ns__techdetechtives_ot"),
+                               ("yara-sekoia__yara_rules_apt_x_strings.yar", "ns__yara_sekoia__yara_rules_apt_x_strings"),
+                               ("apt_apt_x.y.yar", "ns__apt_x_y"), ("9 odd--name__x.yar", "ns__9_odd__name__x"),
+                               ("folder/inside/a.b.yara", "ns__a_b")):
+            self.assertEqual(yara_sources.namespace(name), expected, name)
+
+    def test_file_names_are_unique_where_the_product_would_see_one_namespace(self):
+        taken = set()
+        first = yara_sources.flat_name("yara-x", "malware/apt_apt_one.yar", taken)
+        second = yara_sources.flat_name("yara-x", "malware/apt_one.yar", taken)        # the product drops the repeated 'apt'
+        third = yara_sources.flat_name("yara-x", "malware/apt.one.yar", taken)
+        self.assertEqual(len({first, second, third}), 3)
+        self.assertEqual(len({yara_sources.namespace(name) for name in (first, second, third)}), 3)
+        for name in (first, second, third):
+            self.assertRegex(name, r"^yara-x__[A-Za-z0-9_-]+\.yar$")
+
+    def test_what_is_taken(self):
+        self.assertTrue(yara_sources.wanted("malware/a.yar", ["malware", "cve_rules"], []))
+        self.assertTrue(yara_sources.wanted("deep/er/B.YARA", [], []))
+        self.assertFalse(yara_sources.wanted("malware_extra/a.yar", ["malware"], []))
+        self.assertFalse(yara_sources.wanted("malware/a.yar", ["malware"], ["malware/a.yar"]))
+        self.assertFalse(yara_sources.wanted("malware/a.yar", [], ["mal*"]))
+        self.assertFalse(yara_sources.wanted("malware/readme.md", ["malware"], []))
+        self.assertTrue(yara_sources.is_licence_file("LICENSE.txt") and yara_sources.is_licence_file("COPYING"))
+        self.assertFalse(yara_sources.is_licence_file("docs/LICENSE") or yara_sources.is_licence_file("license_check.yar"))
+
+    def test_rules_are_named_and_cut_whole(self):
+        self.assertEqual(yara_sources.rule_names(self.FIRST + self.SECOND), ["Alpha", "Helper", "Beta"])
+        text, cut = yara_sources.cut_rules(self.FIRST + self.SECOND, {"Alpha", "Commented", "Hidden"})
+        self.assertEqual(cut, ["Alpha"])
+        self.assertEqual(text, "private rule Helper { condition: true }\nrule Beta { condition: Helper }\n")
+        # A rule inside a comment is not cut: cutting it would take the end of the comment with it.
+        text, cut = yara_sources.cut_rules(self.SECOND, {"Commented"})
+        self.assertEqual((text, cut), (self.SECOND, []))
+        tricky = ('rule One {\n  strings:\n    $a = /rule Two \\{ "x/ nocase\n    $b = "http://x" // rule Three {\n    $c = { 41 42 }\n'
+                  '  condition:\n    $a or $b or $c\n}\nrule Four { condition: One }\n')
+        self.assertEqual(yara_sources.rule_names(tricky), ["One", "Four"])
+        self.assertEqual(len(yara_sources.code_only(tricky)), len(tricky))
+        self.assertIn("{ 41 42 }", yara_sources.code_only(tricky))
+        text, cut = yara_sources.cut_rules(self.FIRST + self.SECOND, {"Beta", "Nothing"})
+        self.assertEqual((cut, yara_sources.rule_names(text)), (["Beta"], ["Alpha", "Helper"]))
+
+    def gather(self, files, **options):
+        with tempfile.TemporaryDirectory() as folder:
+            repo, out = Path(folder) / "repo", Path(folder) / "out"
+            for name, text in files.items():
+                (repo / name).parent.mkdir(parents=True, exist_ok=True)
+                (repo / name).write_text(text)
+            done = yara_sources.gather(repo, list(files), out, "yara-x", **options)
+            return done, {path.name: path.read_text() for path in out.iterdir()}
+
+    def test_gathering(self):
+        files = {"LICENSE": "terms", "docs/LICENSE": "other", "index.yar": 'include "./malware/a.yar"\n',
+                 "malware/a.yar": self.FIRST, "malware/b.yar": self.SECOND, "malware/empty.yar": "/* moved */\n",
+                 "malware/nc.yar": '/* License: CC BY-NC-SA 4.0 */\nrule Gamma { condition: true }\n', "notes.txt": "x"}
+        known = {"Beta": "yara-earlier"}
+        done, written = self.gather(files, known=known)
+        self.assertEqual(sorted(written), ["LICENSE", "yara-x__malware_a.yar", "yara-x__malware_b.yar"])
+        self.assertEqual((done["files"], done["rules"]), (2, 3))
+        self.assertEqual((done["index_files"], done["noncommercial"], done["emptied"]), (["index.yar"], ["malware/nc.yar"], ["malware/empty.yar"]))
+        self.assertEqual(known, {"Beta": "yara-earlier", "Alpha": "yara-x"}, "a private helper is not a rule anyone else supplies")
+        done, written = self.gather(files, skip_noncommercial=False)
+        self.assertIn("yara-x__malware_nc.yar", written)
+
+    def test_cutting_named_and_known_rules(self):
+        files = {"a.yar": self.FIRST + "rule Noisy { condition: true }\n", "b.yar": self.SECOND, "c.yar": "rule Noisy2 { condition: true }\n"}
+        done, written = self.gather(files, drop_rules=["Noisy", "Noisy2"])
+        self.assertEqual(sorted(written), ["yara-x__a.yar", "yara-x__b.yar"])
+        self.assertNotIn("Noisy", written["yara-x__a.yar"])
+        self.assertEqual((done["cut"], done["emptied"]), (["a.yar: Noisy", "c.yar: Noisy2"], ["c.yar"]))
+        # A rule an earlier source supplies is cut only when asked. A private helper is never cut that way:
+        # Beta leans on Helper, and a helper matches nothing by itself.
+        done, written = self.gather(files, known={"Alpha": "s", "Helper": "s"})
+        self.assertEqual(done["cut_known"], 0)
+        done, written = self.gather(files, known={"Alpha": "s", "Helper": "s"}, drop_known=True)
+        self.assertEqual((done["cut_known"], done["dependent"]), (1, []))
+        self.assertEqual(sorted(written), ["yara-x__a.yar", "yara-x__b.yar", "yara-x__c.yar"])
+        self.assertEqual(yara_sources.rule_names(written["yara-x__a.yar"]), ["Noisy"])
+        self.assertEqual(written["yara-x__b.yar"], self.SECOND)
+        # When every rule that matches is cut, the helpers left behind are not worth a file.
+        done, written = self.gather(files, known={"Beta": "s"}, drop_known=True)
+        self.assertIn("b.yar", done["emptied"])
+
+    def test_a_file_is_not_left_half_working(self):
+        files = {
+            # UsesBase calls Base in its condition: cutting Base would break it, so the file is left out whole.
+            "d.yar": "rule Base { condition: true }\nrule UsesBase { condition: Base and filesize > 1 }\n",
+            # Here 'Base' is only a tag, and '$Base' a string: cutting the rule Base harms nothing.
+            "e.yar": 'rule Base { condition: true }\nrule Tagged : Base other {\n  strings:\n    $Base = "x"\n  condition:\n    $Base\n}\n',
+            # An import between two rules stays when the rule above it goes.
+            "f.yar": 'rule Base { condition: true }\nimport "pe"\nrule NeedsPe { condition: pe.number_of_sections > 0 }\n',
+            "g.yar": "rule Base { condition: true }\r\nimport \"math\"\r\nrule Crlf { condition: math.entropy(0, 10) > 1 }\r\n",
+        }
+        done, written = self.gather(files, known={"Base": "s"}, drop_known=True)
+        self.assertEqual(done["dependent"], ["d.yar"])
+        self.assertEqual(sorted(written), ["yara-x__e.yar", "yara-x__f.yar", "yara-x__g.yar"])
+        self.assertEqual(yara_sources.rule_names(written["yara-x__e.yar"]), ["Tagged"])
+        self.assertEqual(written["yara-x__f.yar"], 'import "pe"\nrule NeedsPe { condition: pe.number_of_sections > 0 }\n')
+        self.assertTrue(written["yara-x__g.yar"].startswith('import "math"\n'))
+        self.assertEqual(done["cut_known"], 3)
+        if shutil.which("yarac"):
+            with tempfile.TemporaryDirectory() as folder:
+                for name, text in written.items():
+                    (Path(folder) / name).write_text(text)
+                self.assertEqual(yara_sources.check(folder)["refused"], [])
+
+    @unittest.skipUnless(shutil.which("git"), "git is not installed")
+    def test_fetching_a_repository(self):
+        with tempfile.TemporaryDirectory() as folder:
+            repo, out = Path(folder) / "repo", Path(folder) / "out"
+            (repo / "rules" / "sub").mkdir(parents=True)
+            (repo / "rules" / "a.yar").write_text(self.FIRST)
+            (repo / "rules" / "sub" / "b.yara").write_text(self.SECOND)
+            (repo / "other.yar").write_text("rule Elsewhere { condition: true }\n")
+            (repo / "LICENSE").write_text("terms\n")
+            (repo / "big.bin").write_bytes(b"\x00" * 4096)
+            git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "init.defaultBranch=main", "-C", str(repo)]
+            for command in (["init", "-q"], ["add", "."], ["commit", "-q", "-m", "rules"]):
+                subprocess.run(git + command, check=True, capture_output=True, timeout=60)
+            commit = subprocess.run(git + ["rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+            config = configparser.ConfigParser(interpolation=None)
+            config.read_string(f"[yara-x]\nkind = yara-git\nurl = {repo}\ncommit = {commit}\ninclude = rules\nlicence = MIT\n"
+                               f"[yara-y]\nkind = yara-git\nurl = {repo}\ndrop_known = yes\nlicence = MIT\n"
+                               f"[yara-z]\nkind = yara-git\nurl = {repo}\ninclude = nothing-here\nlicence = MIT\n")
+            shared = {}
+            result = fetch_sources.fetch_one("yara-x", config["yara-x"], out, shared)
+            self.assertEqual(result, f"3 rules in 2 files; commit {commit[:12]}")
+            self.assertEqual(sorted(path.name for path in (out / "yara" / "yara-x").iterdir()),
+                             ["LICENSE", "yara-x__rules_a.yar", "yara-x__rules_sub_b.yar"])
+            self.assertIn("yara-x: 3 rules in 2 files", (out / "reports" / "yara-x.txt").read_text())
+            # The second source has the same rules and one more; only the one more is kept.
+            result = fetch_sources.fetch_one("yara-y", config["yara-y"], out, shared)
+            self.assertTrue(result.startswith("1 rules in 1 files, 2 files left out, 2 rules cut"), result)
+            self.assertEqual([path.name for path in (out / "yara" / "yara-y").glob("*.yar")], ["yara-y__other.yar"])
+            with self.assertRaises(fetch_sources.SourceError):
+                fetch_sources.fetch_one("yara-z", config["yara-z"], out, shared)
+            self.assertFalse((out / "yara" / "yara-z").exists())
+            (out / "yara-sources.txt").write_text("yara-x ok\nyara-y ok\n")
+            # The collector puts each source in its own folder beside the kit's own rules.
+            content = Path(folder) / "content"
+            done = subprocess.run(["bash", str(KIT / "tools" / "collect-content.sh"), str(content), str(out)],
+                                  capture_output=True, text=True, timeout=120)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertTrue((content / "yara" / "rules" / "yara-x" / "yara-x__rules_a.yar").is_file())
+            self.assertTrue((content / "yara" / "rules" / "yara-x" / "LICENSE").is_file())
+            self.assertTrue((content / "yara" / "rules" / "techdetechtives_ot.yar").is_file())
+
+    def test_the_kits_own_rules_do_not_go_in_alone(self):
+        # Alone in the product's folder they would replace the thousands of rules the product is built with.
+        collector = ["bash", str(KIT / "tools" / "collect-content.sh")]
+        with tempfile.TemporaryDirectory() as folder:
+            mine = Path(folder) / "yara" / "rules" / "site.yar"
+            mine.parent.mkdir(parents=True)
+            mine.write_text("rule Site { condition: false }\n")                  # a file the owner put in the overlay
+            done = subprocess.run(collector + [folder], capture_output=True, text=True, timeout=120)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertEqual(sorted(path.name for path in mine.parent.iterdir()), ["site.yar"])
+            self.assertIn("no YARA rules are added (no YARA source was fetched)", done.stderr)
+            self.assertIn("1 YARA rule file(s) of your own", done.stderr)
+            self.assertTrue((Path(folder) / "suricata" / "rules" / "techdetechtives-ot.rules").is_file())
+        with tempfile.TemporaryDirectory() as folder:
+            done = subprocess.run(collector + [folder], capture_output=True, text=True, timeout=120,
+                                  env={"PATH": "/usr/local/bin:/usr/bin:/bin", "YARA_ALONE": "true"})
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertTrue((Path(folder) / "yara" / "rules" / "techdetechtives_ot.yar").is_file())
+            self.assertIn("YARA_ALONE is set", done.stderr)
+
+    def test_yara_rule_sets_go_in_together_or_not_at_all(self):
+        collector = ["bash", str(KIT / "tools" / "collect-content.sh")]
+        with tempfile.TemporaryDirectory() as folder:
+            fetched, content = Path(folder) / "fetched", Path(folder) / "content"
+            for name in ("yara-a", "yara-b"):
+                (fetched / "yara" / name).mkdir(parents=True)
+                (fetched / "yara" / name / f"{name}__one.yar").write_text("rule One { condition: false }\n")
+            stale = content / "yara" / "rules" / "yara-old"
+            stale.mkdir(parents=True)
+            (stale / "yara-old__x.yar").write_text("rule Old { condition: false }\n")       # from a source switched off since
+
+            def collect(status):
+                (fetched / "yara-sources.txt").write_text(status)
+                done = subprocess.run(collector + [str(content), str(fetched)], capture_output=True, text=True, timeout=120)
+                self.assertEqual(done.returncode, 0, done.stderr)
+                return done.stderr, sorted(str(path.relative_to(content / "yara" / "rules")) for path in (content / "yara" / "rules").rglob("*.yar"))
+
+            # One of two sources could not be fetched: nothing goes in, and the message names it.
+            message, files = collect("yara-a ok\nyara-b FAILED\n")
+            self.assertEqual(files, [])
+            self.assertIn("not fetched: yara-b", message)
+            # Both fetched: the sets and the kit's own rules go in; the stale folder stays gone.
+            message, files = collect("yara-a ok\nyara-b ok\n")
+            self.assertIn("yara-a/yara-a__one.yar", files)
+            self.assertIn("yara-b/yara-b__one.yar", files)
+            self.assertIn("techdetechtives_ot.yar", files)
+            self.assertFalse(any(name.startswith("yara-old") for name in files))
+            self.assertNotIn("NOTE", message)
+            # A later run in which a source fails takes them out again.
+            message, files = collect("yara-a FAILED\nyara-b ok\n")
+            self.assertEqual(files, [])
+
+    def test_a_link_in_a_repository_is_not_followed(self):
+        if not shutil.which("git"):
+            self.skipTest("git is not installed")
+        with tempfile.TemporaryDirectory() as folder:
+            repo, out, secret = Path(folder) / "repo", Path(folder) / "out", Path(folder) / "secret.txt"
+            secret.write_text("a file of the build machine\n")
+            repo.mkdir()
+            (repo / "real.yar").write_text(self.FIRST)
+            (repo / "LICENSE").symlink_to(secret)
+            (repo / "linked.yar").symlink_to(secret)
+            git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "init.defaultBranch=main", "-C", str(repo)]
+            for command in (["init", "-q"], ["add", "."], ["commit", "-q", "-m", "rules"]):
+                subprocess.run(git + command, check=True, capture_output=True, timeout=60)
+            config = configparser.ConfigParser(interpolation=None)
+            config.read_string(f"[yara-l]\nkind = yara-git\nurl = {repo}\nlicence = MIT\n")
+            fetch_sources.fetch_one("yara-l", config["yara-l"], out, {})
+            self.assertEqual(sorted(path.name for path in (out / "yara" / "yara-l").iterdir()), ["yara-l__real.yar"])
+
+    @unittest.skipUnless(shutil.which("yarac"), "the yarac program is not installed")
+    def test_check_compiles_as_the_product_does(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "s").mkdir()
+            (root / "s" / "good.yar").write_text(self.FIRST)
+            (root / "s" / "also.yar").write_text(self.FIRST)             # the same rule name in another file is fine: another namespace
+            (root / "s" / "broken.yar").write_text("rule Broken { condition: no_such_thing }\n")
+            (root / "_skipped.yar").write_text("this is not YARA")
+            result = yara_sources.check(root)
+            self.assertEqual((result["files"], result["passed"], result["together"]), (3, 2, "ok"))
+            self.assertEqual([name for name, _ in result["refused"]], ["s/broken.yar"])
 
 
 class PlatformContent(unittest.TestCase):
@@ -536,7 +895,7 @@ class PlatformContent(unittest.TestCase):
 
     def test_monitors(self):
         files = sorted((KIT / "detections" / "monitors").glob("*.json"))
-        self.assertEqual(len(files), 3)
+        self.assertEqual(len(files), 4)
         names = set()
         for path in files:
             body = json.loads(path.read_text())
@@ -547,7 +906,25 @@ class PlatformContent(unittest.TestCase):
             trigger = body["triggers"][0]["query_level_trigger"]
             self.assertEqual(trigger["actions"][0]["destination_id"], "malcolm-api-loopback-webhook")
             json.dumps(body["inputs"][0]["search"]["query"])
-        self.assertEqual(len(names), 3)
+        self.assertEqual(len(names), 4)
+
+    def test_dnp3_monitor_names_the_flags_as_the_product_writes_them(self):
+        # The product turns the outstation's 16 indication bits into these words
+        # (Malcolm 26.09.0, logstash/pipelines/zeek/1200_zeek_mutate.conf, zeek.dnp3.iin_flags).
+        written = ['Function Code not Implemented', 'Requested Objects Unknown', 'Parameters Invalid or Out of Range', 'Event Buffer Overflow',
+                   'Operation Already Executing', 'Configuration Corrupt', 'Reserved', 'Reserved', 'Broadcast Msg Rx', 'Class 1 Data Available',
+                   'Class 2 Data Available', 'Class 3 Data Available', 'Time Sync Required', 'Digital Outputs in Local', 'Device Trouble',
+                   'Device Restart']
+        body = json.loads((KIT / "detections" / "monitors" / "techdetechtives_dnp3_outstation_trouble_monitor.json").read_text())
+        query = body["inputs"][0]["search"]["query"]
+        filters = query["query"]["bool"]["filter"]
+        self.assertIn({"term": {"event.dataset": "dnp3"}}, filters)
+        flags = [item["terms"]["zeek.dnp3.iin_flags"] for item in filters if "terms" in item][0]
+        self.assertEqual(sorted(flags), ["Configuration Corrupt", "Device Trouble", "Digital Outputs in Local", "Event Buffer Overflow"])
+        self.assertTrue(set(flags) <= set(written))
+        self.assertNotIn("Device Restart", flags, "rule 1900132 already reports a restart")
+        self.assertEqual(query["aggregations"]["outstation"]["terms"]["field"], "destination.ip")
+        self.assertEqual(body["triggers"][0]["query_level_trigger"]["condition"]["script"]["source"], "ctx.results[0].hits.total.value > 0")
 
     def test_correlation_monitor_looks_for_the_correlation_rules_by_name(self):
         body = json.loads((KIT / "detections" / "monitors" / "techdetechtives_ot_correlation_alert_monitor.json").read_text())
@@ -591,6 +968,122 @@ class HardeningFiles(unittest.TestCase):
         for path in scripts:
             self.assertEqual(subprocess.run(["bash", "-n", str(path)], capture_output=True).returncode, 0, path.name)
             self.assertTrue(path.stat().st_mode & 0o111, f"{path.name} must be executable")
+
+
+class BuildSettings(unittest.TestCase):
+    """The build script's own helper, run by bash on a copy of the product's file layout."""
+
+    def set_value(self, folder, name, value, text):
+        target = Path(folder) / "suricata.env.example"
+        target.write_text(text)
+        script = (KIT / "build-iso.sh").read_text()
+        function = re.search(r"^set_env_value\(\) \{\n.*?^\}\n", script, re.M | re.S)
+        self.assertIsNotNone(function, "set_env_value is not in build-iso.sh")
+        done = subprocess.run(["bash", "-c", function.group(0) + 'set_env_value "$1" "$2" "$3"', "bash", str(target), name, value],
+                              capture_output=True, text=True, timeout=30)
+        return done.returncode, target.read_text()
+
+    def test_a_setting_is_added_once_and_replaced_after_that(self):
+        with tempfile.TemporaryDirectory() as folder:
+            status, text = self.set_value(folder, "SURICATA_STREAM_REASSEMBLY_DEPTH", "0", "SURICATA_DISABLE_SIDS=\n# a comment with no line end")
+            self.assertEqual(status, 0)
+            self.assertEqual(text, "SURICATA_DISABLE_SIDS=\n# a comment with no line end\nSURICATA_STREAM_REASSEMBLY_DEPTH=0\n")
+            status, text = self.set_value(folder, "SURICATA_STREAM_REASSEMBLY_DEPTH", "16mb", text)
+            self.assertEqual(text.count("SURICATA_STREAM_REASSEMBLY_DEPTH="), 1)
+            self.assertTrue(text.endswith("SURICATA_STREAM_REASSEMBLY_DEPTH=16mb\n"))
+            status, text = self.set_value(folder, "SURICATA_DISABLE_SIDS", "2250002", text)
+            self.assertIn("SURICATA_DISABLE_SIDS=2250002\n", text)
+            self.assertIn("SURICATA_STREAM_REASSEMBLY_DEPTH=16mb\n", text)
+        missing = subprocess.run(["bash", "-c", re.search(r"^set_env_value\(\) \{\n.*?^\}\n", (KIT / "build-iso.sh").read_text(), re.M | re.S).group(0)
+                                  + 'set_env_value /nonexistent/file A 1'], capture_output=True, timeout=30)
+        self.assertNotEqual(missing.returncode, 0)
+
+    def test_the_stream_depth_is_set_where_the_installed_system_reads_it(self):
+        script = (KIT / "build-iso.sh").read_text()
+        self.assertIn('set_env_value "$SRC_DIR/config/suricata.env.example" SURICATA_STREAM_REASSEMBLY_DEPTH "$SURICATA_STREAM_DEPTH"', script)
+        self.assertIn('SURICATA_STREAM_DEPTH="0"', (KIT / "build.conf").read_text())
+
+
+class SuricataExtras(unittest.TestCase):
+    """The suppression file, and the tool that switches on Suricata's own protocol event rules."""
+
+    FOLDER = KIT / "overlay" / "malcolm" / "suricata" / "include-configs"
+    SUPPRESS = re.compile(r"^suppress gen_id 1, sig_id \d+(, track by_(src|dst|either), ip [0-9./]+)?$")
+    THRESHOLD = re.compile(r"^threshold gen_id 1, sig_id \d+, type (limit|both|threshold), track by_(src|dst|rule|both), count \d+, seconds \d+$")
+
+    def test_suppression_file_changes_nothing_until_it_is_edited(self):
+        include = (self.FOLDER / "td-threshold.yaml").read_text()
+        self.assertTrue(include.startswith("%YAML 1.1\n---\n"), "Suricata refuses an included file without this header")
+        settings = [line for line in include.splitlines()[2:] if line.strip() and not line.startswith("#")]
+        # /opt/suricata/include-configs is where the product mounts ./suricata/include-configs (its docker-compose.yml).
+        self.assertEqual(settings, ["threshold-file: /opt/suricata/include-configs/td-threshold.config"])
+        lines = (self.FOLDER / "td-threshold.config").read_text().splitlines()
+        self.assertEqual([line for line in lines if line.strip() and not line.startswith("#")], [], "examples only: nothing is suppressed as shipped")
+        examples = [line[1:] for line in lines if line.startswith(("#suppress", "#threshold"))]
+        self.assertGreaterEqual(len(examples), 4)
+        for example in examples:
+            self.assertTrue(self.SUPPRESS.match(example) or self.THRESHOLD.match(example), example)
+
+    BUNDLED = [
+        'alert http any any -> any any (msg:"ET something"; sid:2034647; rev:3;)',
+        '# alert modbus any any -> any any (msg:"SURICATA Modbus invalid Length"; app-layer-event:modbus.invalid_length; classtype:protocol-command-decode; sid:2250003; rev:2;)',
+        '#alert modbus any any -> any any (msg:"SURICATA Modbus invalid Value"; app-layer-event:modbus.invalid_value; sid:2250006; rev:2;)',
+        'alert dnp3 any any -> any any (msg:"SURICATA DNP3 Request flood detected"; app-layer-event:dnp3.flooded; sid:2270000; rev:2;)',
+        '# alert dnp3 any any -> any any (msg:"ET SCADA something the publisher switched off"; sid:2099003; rev:1;)',
+        '# alert tcp any any -> any any (msg:"ET disabled"; sid:2099002; rev:1;)',
+        '# a comment that mentions sid:2250001; and is not a rule',
+    ]
+
+    def test_status_of_the_protocol_event_rules(self):
+        lines, found = protocol_events.status_lines(self.BUNDLED)
+        self.assertEqual(found, {2250003: "commented", 2250006: "commented", 2270000: "active"})
+        self.assertEqual(lines[0], "modbus: 0 of 8 event rules active, 2 commented out, 6 not in the file; "
+                                   "all 'modbus' rules in the file: 0 active, 2 commented out")
+        self.assertTrue(lines[1].startswith("dnp3: 1 of 8 event rules active, 0 commented out, 7 not in the file; all 'dnp3' rules in the file: 1 active, 1 commented out"))
+        self.assertEqual(len(protocol_events.WANTED), 18)
+
+    def test_only_the_event_rules_are_switched_on(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / "dist"
+            source.mkdir()
+            (source / "enip-events.rules").write_text(
+                '# ENIP app layer event rules\n'
+                'alert enip any any -> any any (msg:"SURICATA ENIP too many transactions"; app-layer-event:enip.too_many_transactions; sid:2234000; rev:1;)\n'
+                '#alert enip any any -> any any (msg:"SURICATA ENIP invalid PDU"; app-layer-event:enip.invalid_pdu; sid:2234001; rev:1;)\n')
+            (source / "dnp3-events.rules").write_text(            # Suricata writes these over several lines
+                '# Flooded.\n'
+                'alert dnp3 any any -> any any (msg:"SURICATA DNP3 Request flood detected"; \\\n'
+                '      app-layer-event:dnp3.flooded; classtype:protocol-command-decode; sid:2270000; rev:2;)\n'
+                '\n'
+                'alert dnp3 any any -> any any (msg:"SURICATA DNP3 Length too small"; \\\n'
+                '      app-layer-event:dnp3.len_too_small; classtype:protocol-command-decode; sid:2270001; rev:3;)\n')
+            (source / "modbus-events.rules").write_text(
+                'alert modbus any any -> any any (msg:"SURICATA Modbus invalid Length"; app-layer-event:modbus.invalid_length; sid:2250003; rev:2;)\n'
+                'alert modbus any any -> any any (msg:"SURICATA Modbus Request flood detected"; app-layer-event:modbus.flooded; sid:2250009; rev:2;)\n')
+            target = Path(folder) / "suricata.rules"
+            target.write_text("\n".join(self.BUNDLED) + "\n")
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(protocol_events.main(["enable", str(target), "--from", str(source)]), 0)
+            self.assertIn("2 switched on, 3 added", out.getvalue())
+            after = target.read_text().splitlines()
+            self.assertEqual(after[0], self.BUNDLED[0])
+            self.assertTrue(after[1].startswith("alert modbus") and after[2].startswith("alert modbus"))
+            self.assertEqual(after[3:7], self.BUNDLED[3:7], "rules the publisher switched off, and comments, stay as they were")
+            added = [line for line in after[7:] if line.startswith("alert ")]
+            self.assertEqual(sorted(re.search(r"sid:(\d+)", line).group(1) for line in added), ["2234000", "2250009", "2270001"],
+                             "a rule already in the file is not added twice, and a rule Suricata ships switched off is not added")
+            joined = [line for line in added if "sid:2270001;" in line][0]
+            self.assertEqual(joined, 'alert dnp3 any any -> any any (msg:"SURICATA DNP3 Length too small"; '
+                                     'app-layer-event:dnp3.len_too_small; classtype:protocol-command-decode; sid:2270001; rev:3;)')
+            # A second run finds nothing to do and leaves the file alone.
+            before = target.read_text()
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                protocol_events.main(["enable", str(target), "--from", str(source)])
+            self.assertIn("0 switched on, 0 added", out.getvalue())
+            self.assertEqual(target.read_text(), before)
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(protocol_events.main(["status", str(target)]), 1)        # not all 18 are there
+                self.assertEqual(protocol_events.main(["status", str(Path(folder) / "none")]), 2)
 
 
 class AttackIcs(unittest.TestCase):

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# TechDetechtives OT IDS. Copyright (c) 2026 TechDetechtives. MIT licence.
+#
+# The traffic profile: what else is on the control network besides the
+# industrial protocols (remote access to controllers, long connections, large
+# transfers, conversations that repeat like clockwork, public addresses,
+# attempts nobody answered). It reads the connection records the sensor has
+# already stored, prints a report and changes nothing. Run as the account that
+# runs the product, on the server:
+#
+#   td-profile                          the last 24 whole hours
+#   td-profile --hours 72 --top 25
+#   td-profile --format markdown > profile.md
+#   td-profile --format csv > conversations.csv      every conversation, one per line
+#
+# Masters and devices are named from the baseline's list (td-baseline).
+
+set -euo pipefail
+
+DIR="${MALCOLM_DIR:-$HOME/Malcolm}"
+[[ -f "$DIR/docker-compose.yml" ]] || { echo "[profile] $DIR does not look like the product folder (set MALCOLM_DIR)" >&2; exit 1; }
+cd "$DIR"
+if ! docker compose ps --services --status running 2>/dev/null | grep -qx dashboards-helper; then
+  echo "[profile] the product is not running (start it with ./scripts/start)" >&2
+  exit 1
+fi
+exec docker compose exec -T dashboards-helper python3 /opt/techdetechtives/td_profile.py "$@"

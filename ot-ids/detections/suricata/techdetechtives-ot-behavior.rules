@@ -19,7 +19,10 @@
 # --- Modbus ----------------------------------------------------------------
 alert modbus any any -> any any (msg:"TECHDETECHTIVES OT Behaviour - Modbus writes at an unusual rate from one address"; flow:to_server; modbus: access write; threshold: type both, track by_src, count 100, seconds 10; classtype:attempted-admin; priority:2; sid:1900401; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
 alert tcp any 502 -> any any (msg:"TECHDETECHTIVES OT Behaviour - Modbus device answering with errors repeatedly (probing, fuzzing or a misconfigured client)"; flow:established,to_client; content:"|00 00|"; offset:2; depth:2; content:"|00 03|"; offset:4; depth:2; byte_test:1,&,128,7; threshold: type both, track by_dst, count 20, seconds 60; classtype:attempted-recon; priority:3; sid:1900403; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
-alert modbus any any -> any any (msg:"TECHDETECHTIVES OT Behaviour - Modbus device identification requested many times (inventory sweep)"; flow:to_server; modbus: function 43, subfunction 14; threshold: type both, track by_src, count 10, seconds 60; classtype:attempted-recon; priority:2; sid:1900406; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+# Device identification is matched by its bytes (function 43, interface type 14,
+# at bytes 7 and 8 of a Modbus/TCP request): the decoder's "subfunction" option
+# is compared for function 8 only and never matches function 43.
+alert tcp any any -> any 502 (msg:"TECHDETECHTIVES OT Behaviour - Modbus device identification requested many times (inventory sweep)"; flow:established,to_server; content:"|00 00|"; offset:2; depth:2; content:"|2b 0e|"; offset:7; depth:2; threshold: type both, track by_src, count 10, seconds 60; classtype:attempted-recon; priority:2; sid:1900406; rev:2; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
 
 # --- Any controller port ---------------------------------------------------
 # A master keeps its connections open. Thirty new connections a minute to

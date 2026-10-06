@@ -92,6 +92,23 @@ Malcolm bundles Zeek, Suricata, Arkime, OpenSearch, NetBox and other tools, each
 
 External rule sets and threat indicators are downloaded when an ISO or an update is built, not stored here. `ot-ids/sources.conf` names each one and its licence: by default NSA ELITEWOLF (CC0), Digital Bond Quickdraw (MIT), Aleksi Bovellan's Nmap scan detection rules (MIT), a selection from Critical Path Security's collection of public threat feeds (MIT collection; each feed keeps its own terms) and CISA's Known Exploited Vulnerabilities catalogue (CC0). Sources under the GPL or custom terms are listed but switched off.
 
+**YARA rule sets (since 0.13.0).** Malcolm's file-scanner image is built with nine public YARA rule repositories compiled in. So that they stay in use beside the TechDetechtives rules (see `ot-ids/docs/LISTED-REPOSITORIES-REVIEW.md`, fault 3), an ISO or update built with the defaults carries the rule files of eight of them, unchanged apart from their file names, each in its own folder with the repository's licence file:
+
+| Source | Licence |
+| --- | --- |
+| Neo23x0/signature-base (Florian Roth) | Detection Rule License 1.1. Files that state a non-commercial licence or name the GPL in their header are left out. |
+| elastic/protections-artifacts | **Elastic License 2.0.** Not an open-source licence: the rules may be used, copied and distributed, but not offered to others as a hosted or managed service, and the licence text must go with every copy. |
+| reversinglabs/reversinglabs-yara-rules | MIT |
+| SEKOIA-IO/Community | Detection Rule License 1.1 |
+| advanced-threat-research/Yara-Rules (Trellix) | Apache-2.0 |
+| bartblaze/Yara-rules | MIT |
+| eset/malware-ioc | BSD-2-Clause |
+| volexity/threat-intel | BSD-2-Clause |
+
+The ninth, kevoreilly/CAPEv2 (GPL-3.0), and Yara-Rules/rules (GPL-2.0, a filtered part) are listed and switched off. Whoever distributes an ISO or update is distributing these rule files and must keep each licence file with them; switching a source off in `ot-ids/sources.conf` leaves it out. Malcolm's own image contains the same nine in compiled form whatever is chosen here. The licences above were read from each repository's licence file at the pinned commit; individual rule files can state terms of their own, and only the two kinds named above are filtered.
+
+The traffic profile (`ot-ids/baseline/td_profile.py`) reports measures that RITA (activecm/rita, GPL-3.0) made familiar; none of RITA's code is used. The table of IEC 60870-5-104 type names in `ot-ids/tools/snort2suricata.py` holds the standard's own identifiers, checked against Snort 3's source (GPL-2.0), from which no code is taken. Suricata's own protocol event rules (GPL-2.0) are part of the Suricata package inside Malcolm's image; the build switches them on there and does not copy them into this repository.
+
 ## 8. MITRE ATT&CK for ICS (technique reference of the OT IDS)
 
 - Source: MITRE ATT&CK for ICS 19.2, https://attack.mitre.org, data from https://github.com/mitre-attack/attack-stix-data (commit in `upstream.lock`)
