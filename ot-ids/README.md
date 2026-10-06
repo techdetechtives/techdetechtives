@@ -177,6 +177,64 @@ labels tagged Suricata alerts with the framework name "MITRE ATT&CK", without
 watch and YARA matches are mapped on the page but do not carry the technique
 in the alert.
 
+### Baseline: who talks to whom, and what is new
+
+An industrial network repeats itself, so the most useful anomaly detection
+for one is also the simplest: learn who talks to whom with which operations,
+then say what is new and what has stopped. `baseline/td_baseline.py` does
+that. It is one Python file with no dependencies, runs every 15 minutes inside
+the server's own `dashboards-helper` container, and reads the industrial
+protocol records the sensors have already decoded.
+
+| Finding | Meaning |
+| --- | --- |
+| new-master | An address acting as a master of a protocol for the first time: never seen before, or one that only answered until now |
+| new-device, new-service | An address never seen before answers an industrial protocol; a known device answers a protocol it never answered |
+| new-pair, sweep | A known master talks to a device it never talked to; or to more than five of them |
+| new-operation | An operation never used between a master and a device (ranked higher when it changes something) |
+| burst | An operation used far more in an hour than in any hour while learning |
+| quiet | A device or master that was heard nine hours in ten has stopped for four hours |
+| sensor-silent | No industrial traffic at all for four hours: the sensor or its mirror port, not the plant |
+
+Each finding is a sentence a person can act on, for example "10.0.0.99 was
+never seen before and is acting as a master by modbus. It talked to: 10.0.1.10
+(modbus). Operations: WRITE_SINGLE_COIL."
+
+**It learns by itself and reports nothing until you say so.** From the first
+start it reads what is stored (up to 30 days back) and learns until it has seen
+14 days' worth of hours with traffic. Its alerts are off. On the server, as the
+account that runs the product:
+
+```bash
+td-baseline              # where learning stands, and what is known
+td-baseline check        # read the last hour and show what was found; changes nothing
+td-baseline findings     # what it has found so far (recorded even while alerts are off)
+td-baseline test-alert   # send one test alert and look for it in the dashboards
+td-baseline alerts on    # from now on, findings become alerts
+```
+
+Run `check` and `test-alert` first: they show on your system the two things
+that could not be tried where this was written (see "Test status"). Alerts
+appear with `rule.name` "TechDetechtives OT Baseline" beside every other
+alert, with their ATT&CK for ICS technique where one applies.
+
+For planned work, `td-baseline learn --hours 8` treats the next eight hours as
+normal. `td-baseline forget ADDRESS` drops an address so it is reported again;
+`td-baseline reset --yes` starts over from now. Settings (learning time, the
+four-hour and threefold thresholds, limits) are environment variables named
+at the top of the program; put them in `~/Malcolm/config/dashboards-helper.env`.
+
+What it cannot tell you: whether something new is wanted. A replaced HMI, a
+commissioning laptop and an intruder all arrive as "new master". Broadcast
+protocols (BACnet Who-Is, EtherNet/IP I/O to a group address) make the sender
+look like a master. What has not been seen for 90 days is dropped from the
+list and is new again when it returns. `OT_BASELINE="false"` in `build.conf`
+leaves the program out.
+
+Sixteen anomaly-detection projects were read before this was written. None
+could be used as it was; seven ideas from four of them are in it. See
+[`docs/ANOMALY-DETECTION-REVIEW.md`](docs/ANOMALY-DETECTION-REVIEW.md).
+
 ### Anomaly detectors and correlation monitors
 
 Three detectors for the platform's anomaly detection (it learns each plant's
@@ -383,8 +441,11 @@ cores and 32+ GB RAM recommended, and as much SSD storage as you can give it.
 - `docs/ATTACK-ICS-COVERAGE.md`, `.csv` and `docs/attack-ics-layer.json`: the
   coverage of the detections kept in this repository. Generated; the tests
   fail if they fall behind the tables.
-- `docs/AI-NIDS-REVIEW.md` and `docs/PROJECT-REVIEWS.md`: reviews of six
-  outside projects, and what was and was not taken from each.
+- `baseline/td_baseline.py`: the baseline program; `attack/baseline-findings.csv`
+  maps its findings to ATT&CK for ICS.
+- `docs/AI-NIDS-REVIEW.md`, `docs/PROJECT-REVIEWS.md` and
+  `docs/ANOMALY-DETECTION-REVIEW.md`: reviews of 22 outside projects, and what
+  was and was not taken from each.
 - `tests/`: run with `python3 -m unittest discover -s ot-ids/tests -v`, or
   through `scripts/verify.sh repo`.
 
@@ -407,7 +468,7 @@ advice.
 
 Run and passing in the author's environment (2026-10-06):
 
-- `ot-ids/tests` (46 tests): rule structure and reserved numbers; every flag a
+- `ot-ids/tests` (100 tests): rule structure and reserved numbers; every flag a
   correlation alert waits for is set by a marker; byte-position rules against
   sample UMAS, S7, IEC 104, Modbus, BACnet and TFTP packets, including
   look-alikes that must not match; the nine YARA rules compiled and run by
@@ -417,6 +478,17 @@ Run and passing in the author's environment (2026-10-06):
   repository has a row in the mapping, every technique and tactic named exists
   in the reference, tagging adds only the technique to a rule and does it
   once, and the coverage files in `docs/` match what the tool writes.
+- The baseline program (54 of the 100 tests) against a stand-in for the
+  product: a small web server that works out the one OpenSearch search the
+  program makes from records held in memory, and takes alerts the way the
+  product's webhook does. Learning, each kind of finding, late records, a
+  sensor outage, a search that fails or answers in part, a webhook that is
+  down or refuses, a wrong clock, limits and every command are covered.
+- An independent review of the baseline program's first version demonstrated
+  fifteen defects; all are fixed and each has a test. The same review checked
+  the search against the source and documentation of OpenSearch 3.8 (the
+  version the product ships) and the webhook, the container's user, volume,
+  environment and crontab against the product's source.
 - Every technique identifier and name in the mapping tables was read from
   MITRE's data file (attack-stix-data commit `6cda5ad`, ATT&CK for ICS 19.2),
   not written from memory. Tagging and the coverage report were run on the
@@ -461,6 +533,13 @@ and no VM:
   pipeline (`logstash/pipelines/suricata/11_suricata_logs.conf`), and that
   Suricata accepts any text as metadata was read in its source; neither was
   watched happening. The Navigator layer has not been opened in Navigator.
+- **The baseline program has not read from a real OpenSearch or sent an
+  alert to the real webhook**, and the image layer that installs it has not
+  been built. Its stand-in was written by the same hand, so it cannot catch a
+  wrong belief about the product; the review above narrowed that, and
+  `td-baseline check` and `td-baseline test-alert` are there to settle it on
+  an installed system. How long its search takes on a busy plant, and what the
+  decoders really call S7 and BACnet operations, are unknown.
 - The mapping is one reviewer's reading of MITRE's descriptions. Nobody else
   has checked it, and it has not been compared with a real incident.
 - The download of sources outside GitHub (CISA, Snort, abuse.ch) was blocked

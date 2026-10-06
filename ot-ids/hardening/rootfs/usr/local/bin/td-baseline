@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# TechDetechtives OT IDS. Copyright (c) 2026 TechDetechtives. MIT licence.
+#
+# The baseline program (who talks to whom on the control network, and what is
+# new) runs inside the product's dashboards-helper container. This passes a
+# command to it. Run as the account that runs the product, on the server:
+#
+#   td-baseline                 where learning stands and what is known
+#   td-baseline check           read the last hour and say what was found; changes nothing
+#   td-baseline findings        the most recent findings
+#   td-baseline test-alert      send one test alert, to see it arrive in the dashboards
+#   td-baseline alerts on       hand findings to the product as alerts (off until you say so)
+#   td-baseline learn --hours 8 treat the next 8 hours as normal (maintenance)
+#   td-baseline forget ADDRESS  drop an address, so it is reported when it next appears
+#   td-baseline reset --yes     forget everything and learn again
+
+set -euo pipefail
+
+DIR="${MALCOLM_DIR:-$HOME/Malcolm}"
+[[ -f "$DIR/docker-compose.yml" ]] || { echo "[baseline] $DIR does not look like the product folder (set MALCOLM_DIR)" >&2; exit 1; }
+cd "$DIR"
+if ! docker compose ps --services --status running 2>/dev/null | grep -qx dashboards-helper; then
+  echo "[baseline] the product is not running (start it with ./scripts/start)" >&2
+  exit 1
+fi
+[[ $# -gt 0 ]] || set -- status
+exec docker compose exec -T dashboards-helper python3 /opt/techdetechtives/td_baseline.py "$@"
