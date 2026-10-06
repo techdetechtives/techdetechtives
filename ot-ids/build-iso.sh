@@ -33,6 +33,7 @@ BUILD_MODE="${BUILD_MODE:-auto}"                   # auto | vagrant | native (na
 FETCH_SOURCES="${FETCH_SOURCES:-true}"             # true = download the sources enabled in sources.conf
 ZEEK_L2_WATCH="${ZEEK_L2_WATCH:-true}"             # true = add the layer 2 (ARP) watch if the product's Zeek accepts it
 ATTACK_ICS_TAGS="${ATTACK_ICS_TAGS:-true}"         # true = write each rule's MITRE ATT&CK for ICS technique into the rule
+OT_BASELINE="${OT_BASELINE:-true}"                 # true = add the baseline program (learns what is normal; its alerts start switched off)
 HARDENING="${HARDENING:-true}"                     # true = add the files under hardening/ to the ISO
 HARDEN_SHELL_TIMEOUT="${HARDEN_SHELL_TIMEOUT:-900}"        # seconds before an idle SSH/console shell closes; 0 = never
 HARDEN_USB_STORAGE_OFF="${HARDEN_USB_STORAGE_OFF:-false}"  # true = block USB sticks (also blocks updates by USB)
@@ -505,10 +506,18 @@ EOF
 # /opt/anomaly_detectors and /opt/alerting/monitors).
 add_platform_content() {
   local src="$KIT_DIR/detections" ctx="$WORK_DIR/content-ctx/dashboards-helper"
-  compgen -G "$src/anomaly_detectors/*.json" >/dev/null || compgen -G "$src/monitors/*.json" >/dev/null || return 0
+  compgen -G "$src/anomaly_detectors/*.json" >/dev/null || compgen -G "$src/monitors/*.json" >/dev/null || \
+    [[ "$OT_BASELINE" == "true" ]] || return 0
   rm -rf "$ctx"
-  mkdir -p "$ctx/anomaly_detectors" "$ctx/monitors"
+  mkdir -p "$ctx/anomaly_detectors" "$ctx/monitors" "$ctx/baseline"
   : > "$ctx/Dockerfile.body"
+  if [[ "$OT_BASELINE" == "true" && -f "$KIT_DIR/baseline/td_baseline.py" ]]; then
+    # The baseline program: one file, and one line in the helper container's own crontab.
+    # If the line cannot be added the image is still built; the program then only runs by hand.
+    cp "$KIT_DIR/baseline/td_baseline.py" "$ctx/baseline/"
+    echo 'COPY --chmod=644 baseline/td_baseline.py /opt/techdetechtives/td_baseline.py' >> "$ctx/Dockerfile.body"
+    echo "RUN f=\"\${SUPERCRONIC_CRONTAB:-/etc/crontab}\"; grep -q td_baseline.py \"\$f\" || printf '\\n%s\\n' '7,22,37,52 * * * * /usr/bin/python3 /opt/techdetechtives/td_baseline.py run' >> \"\$f\" || echo 'td-baseline: crontab not changed'" >> "$ctx/Dockerfile.body"
+  fi
   if compgen -G "$src/anomaly_detectors/*.json" >/dev/null; then
     cp "$src"/anomaly_detectors/*.json "$ctx/anomaly_detectors/"
     echo 'COPY --chmod=644 anomaly_detectors/*.json /opt/anomaly_detectors/' >> "$ctx/Dockerfile.body"

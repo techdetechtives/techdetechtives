@@ -1,0 +1,20 @@
+# Techniques for the findings of the baseline program (ot-ids/baseline/td_baseline.py),
+# which it writes into its own alerts. Kept in step with the program by the tests.
+#
+# These are not counted in the coverage report: the program's alerts are off
+# until an operator switches them on, and a list of what is normal never sees a
+# technique itself, only that something is new or has stopped. Every fit is "related".
+kind,technique,tactic,fit,why
+new-master,T0848,TA0108,related,"An address acting as a master for the first time is what a rogue master looks like; so does a new engineering station"
+new-device,T0864,TA0108,related,"A device nobody has seen before on the control network; a replaced or added device looks the same"
+new-service,-,-,-,"A known device answering a new protocol: a change worth knowing, with no technique of its own"
+new-pair,-,-,-,"A known master reaching a device it never used: a change worth knowing, with no technique of its own"
+sweep,T0846,TA0102,related,"One master reaching many devices it never talked to is how a search for devices looks"
+new-operation,-,-,-,"A first use of an operation that changes nothing on the device"
+new-control-operation,T1692.001,TA0106,related,"A first use of an operation that changes something; whether it was authorised is for a person to say"
+burst,-,-,-,"A rate far above what was learned; what it means depends on the operation"
+quiet,T0814,TA0107,related,"A device or master that was always there has stopped; an attack is one cause, a fault or planned work are others"
+sensor-silent,-,-,-,"The sensor's own health, not the plant's"
+resumed,-,-,-,"Recorded only, never sent"
+overflow,-,-,-,"A note that one pass found more than it sends"
+list-full,-,-,-,"The program's own limit, reached; a scan or forged addresses are the likely cause, and other detections name those"

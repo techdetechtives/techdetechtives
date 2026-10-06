@@ -180,7 +180,7 @@ PY
     if python3 -m unittest discover -s "$ROOT/ot-ids/tests" >/dev/null 2>&1; then
       skipped=""
       command -v yara >/dev/null 2>&1 || skipped="; YARA rules skipped, yara is not installed"
-      pass "OT IDS tests (rules against sample packets, Snort conversion, indicators, vulnerability index, ATT&CK for ICS mapping, hardening files$skipped)"
+      pass "OT IDS tests (rules against sample packets, Snort conversion, indicators, vulnerability index, ATT&CK for ICS mapping, baseline program, hardening files$skipped)"
     else
       fail "OT IDS tests (run: python3 -m unittest discover -s ot-ids/tests -v)"
     fi

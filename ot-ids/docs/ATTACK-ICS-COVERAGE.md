@@ -228,9 +228,9 @@ possible: the note on each says what it would take.
 - **T0802 Automated Collection.** Shows as steady reading from an address that does not normally read. The three OT anomaly detectors (shipped switched off) are the nearest thing; there is no rule.
 - **T0817 Drive-by Compromise.** Web browsing from the control network. The general rule set bundled with the product is where exploit-kit rules live; it is not counted on this page.
 - **T0819 Exploit Public-Facing Application.** Exploits of known vulnerabilities are in the general rule set bundled with the product, listed by CVE in the build's vulnerability coverage report; they are not counted on this page.
-- **T0848 Rogue Master.** Needs the list of real masters. Set MODBUS_CLIENT and DNP3_CLIENT on the sensor and the imported Quickdraw rules name commands from any other address.
+- **T0848 Rogue Master.** Needs the list of real masters. The baseline program learns it and reports a new master, once its alerts are switched on (td-baseline alerts on); it is not counted here while they are off. Or set MODBUS_CLIENT and DNP3_CLIENT on the sensor and the imported Quickdraw rules name commands from any other address.
 - **T0860 Wireless Compromise.** Radio links are not on the wire the sensor listens to.
-- **T0864 Transient Cyber Asset.** A new laptop on the network appears in the product's asset inventory; no alert is defined for it here.
+- **T0864 Transient Cyber Asset.** The baseline program reports an address never seen before on an industrial protocol, once its alerts are switched on (td-baseline alerts on); it is not counted here while they are off.
 - **T0865 Spearphishing Attachment.** Email is not normally carried on a control network; this belongs to the mail gateway.
 - **T0884 Connection Proxy.** Proxy and tunnelling tools have nothing specific to industrial networks to match on; the general rule set is where such rules belong.
 - **T0885 Commonly Used Port.** The imported Quickdraw set has rules for another protocol on the Modbus and DNP3 ports. Nothing in this repository does it.

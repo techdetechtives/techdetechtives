@@ -131,7 +131,7 @@ Installs guidance files that let an AI assistant such as Claude Code help with d
 cd ot-ids && ./build-iso.sh        # on a Linux build host with Docker and Internet access
 ```
 
-Builds two installer ISOs for a standalone industrial network IDS that does not need the Security Onion platform: a server and a capture sensor, based on Malcolm, carrying the Suricata and YARA rules from `platform/detections/` plus rules, anomaly detectors, threat indicators and hardening of its own. Its alerts carry their MITRE ATT&CK for ICS technique, and [a coverage page](ot-ids/docs/ATTACK-ICS-COVERAGE.md) shows which techniques have a detection and which do not. It installs and is updated without Internet access. See [ot-ids/README.md](ot-ids/README.md) for what is in it, how to add Snort rule sets and indicators, and what has and has not been tested.
+Builds two installer ISOs for a standalone industrial network IDS that does not need the Security Onion platform: a server and a capture sensor, based on Malcolm, carrying the Suricata and YARA rules from `platform/detections/` plus rules, anomaly detectors, threat indicators and hardening of its own. A baseline program learns who talks to whom on the control network and reports what is new or has stopped. Its alerts carry their MITRE ATT&CK for ICS technique, and [a coverage page](ot-ids/docs/ATTACK-ICS-COVERAGE.md) shows which techniques have a detection and which do not. It installs and is updated without Internet access. See [ot-ids/README.md](ot-ids/README.md) for what is in it, how to add Snort rule sets and indicators, and what has and has not been tested.
 
 **Try it without a platform:** leave `TD_ES_HOST` empty and run step 3 alone. The notebooks then run on bundled synthetic sample data.
 
@@ -162,7 +162,7 @@ Upgrade the platform with its own upgrade tool (`soup`). The overlay lives in th
 
 ## Status
 
-Version 0.11.0. What has and has not been exercised is listed in [MODIFICATIONS.md](MODIFICATIONS.md#test-status). In short: the overlay, installers, forwarder, connector and notebook logic have automated tests against stand-ins; on a live Security Onion 2.4.211 the console pages, both access keys, DFIR-IRIS and the forwarder's connections were confirmed. Not yet seen on a live system: a rule firing, an alert becoming a ticket, the workbench image and Spark, Greenbone and its connector, the honeypot, the rule-enable setting, the layer 2 watch, and the network inventory.
+Version 0.12.0. What has and has not been exercised is listed in [MODIFICATIONS.md](MODIFICATIONS.md#test-status). In short: the overlay, installers, forwarder, connector and notebook logic have automated tests against stand-ins; on a live Security Onion 2.4.211 the console pages, both access keys, DFIR-IRIS and the forwarder's connections were confirmed. Not yet seen on a live system: a rule firing, an alert becoming a ticket, the workbench image and Spark, Greenbone and its connector, the honeypot, the rule-enable setting, the layer 2 watch, and the network inventory.
 
 ## Licence
 
