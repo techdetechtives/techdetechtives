@@ -6,8 +6,10 @@ Run on a machine with Internet access (needs git and Python 3; nothing else).
 Writes a folder laid out like the product's own:
 
     suricata/rules/ext-<source>.rules     converted or as-published rules
+    yara/<source>/*.yar                   YARA rule files, each under a unique name
     zeek/intel/<source>/*.intel           threat indicators
     kev/known_exploited_vulnerabilities.json
+    yara-sources.txt                      each enabled YARA source and whether it was fetched
     reports/<source>.txt                  what conversion changed or set aside
     SOURCES.txt                           what was fetched, from where, when
 
@@ -20,6 +22,7 @@ import configparser
 import datetime
 import fnmatch
 import io
+import os
 import shutil
 import subprocess
 import sys
@@ -31,9 +34,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ioc2intel          # noqa: E402
 import snort2suricata     # noqa: E402
+import yara_sources       # noqa: E402
 
-KINDS = ("snort-git", "snort-url", "suricata-git", "suricata-url", "intel-git", "ioc-url", "kev-url")
+KINDS = ("snort-git", "snort-url", "suricata-git", "suricata-url", "yara-git", "intel-git", "ioc-url", "kev-url")
 MAX_DOWNLOAD = 300 * 1024 * 1024
+# A repository that is private or gone makes git ask for a name and password; fail instead of waiting.
+GIT_ENV = dict(os.environ, GIT_TERMINAL_PROMPT="0")
 
 
 class SourceError(Exception):
@@ -47,7 +53,7 @@ def names(text):
 def git_fetch(url, commit, folder):
     """Shallow copy of a repository at its newest commit, or at one named commit."""
     def run(*command):
-        result = subprocess.run(["git", *command], cwd=folder, capture_output=True, text=True, timeout=900)
+        result = subprocess.run(["git", *command], cwd=folder, capture_output=True, text=True, timeout=900, env=GIT_ENV)
         if result.returncode != 0:
             raise SourceError(f"git {' '.join(command[:2])} failed: {result.stderr.strip()[-300:]}")
         return result.stdout.strip()
@@ -56,6 +62,41 @@ def git_fetch(url, commit, folder):
     run("fetch", "-q", "--depth", "1", "origin", commit or "HEAD")
     run("checkout", "-q", "FETCH_HEAD")
     return run("rev-parse", "HEAD")
+
+
+def git_fetch_some(url, commit, folder, choose):
+    """The files of a repository that 'choose' picks, at its newest commit or at one named commit.
+
+    Asks the server for the commit without file contents, then for the chosen
+    files in one request, so a large repository costs what its rule files
+    weigh. A server that cannot do either sends everything, and the result is
+    the same. Returns (commit, chosen paths).
+    """
+    def run(*command, feed=None, must=True):
+        result = subprocess.run(["git", "-c", "core.quotepath=off", "-c", "gc.auto=0", *command], cwd=folder, input=feed,
+                                capture_output=True, encoding="utf-8", errors="replace", timeout=1800, env=GIT_ENV)
+        if result.returncode != 0 and must:
+            raise SourceError(f"git {' '.join(command[:2])} failed: {result.stderr.strip()[-300:]}")
+        return result.stdout
+    run("init", "-q")
+    run("remote", "add", "origin", url)
+    run("fetch", "-q", "--depth", "1", "--filter=blob:none", "origin", commit or "HEAD")
+    chosen, objects = [], []
+    for entry in run("ls-tree", "-r", "-z", "FETCH_HEAD").split("\0"):
+        meta, _, path = entry.partition("\t")
+        fields = meta.split()
+        # Ordinary files only: a link (mode 120000) could point at a file of the build machine, and a
+        # name that is not UTF-8 (shown here with a replacement mark) cannot be asked for by name.
+        if len(fields) == 3 and fields[1] == "blob" and fields[0] in ("100644", "100755") and "\ufffd" not in path and choose(path):
+            chosen.append(path)
+            objects.append(fields[2])
+    if objects:
+        # One request for all the chosen files. Without it git asks for them one at a time.
+        run("-c", "fetch.negotiationAlgorithm=noop", "fetch", "-q", "origin", "--no-tags", "--no-write-fetch-head",
+            "--recurse-submodules=no", "--filter=blob:none", "--stdin", feed="\n".join(objects) + "\n", must=False)
+    for start in range(0, len(chosen), 200):
+        run("checkout", "-q", "FETCH_HEAD", "--", *chosen[start:start + 200])
+    return run("rev-parse", "FETCH_HEAD").strip(), chosen
 
 
 def download(url):
@@ -92,7 +133,32 @@ def count_rules(text):
     return sum(1 for line in text.splitlines() if line.startswith(("alert ", "drop ", "reject ")))
 
 
-def fetch_one(name, section, out):
+def fetch_yara(name, section, out, shared):
+    include, exclude = names(section.get("include", "")), names(section.get("exclude", ""))
+
+    def choose(path):
+        return yara_sources.is_licence_file(path) or yara_sources.wanted(path, include, exclude)
+
+    with tempfile.TemporaryDirectory() as folder:
+        commit, paths = git_fetch_some(section["url"], section.get("commit", ""), folder, choose)
+        if not any(yara_sources.is_rule_file(path) for path in paths):
+            raise SourceError("no .yar or .yara file in the repository matches 'include'")
+        done = yara_sources.gather(
+            Path(folder), paths, out / "yara" / name, name, include, exclude,
+            drop_rules=names(section.get("drop_rules", "")), known=shared.setdefault("yara_names", {}),
+            drop_known=section.getboolean("drop_known", fallback=False),
+            skip_noncommercial=section.getboolean("skip_noncommercial", fallback=True),
+            taken=shared.setdefault("yara_namespaces", set()))
+    if not done["files"]:
+        shutil.rmtree(out / "yara" / name, ignore_errors=True)
+        raise SourceError("no rule was left after the filters")
+    reports = out / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+    (reports / f"{name}.txt").write_text("\n".join(yara_sources.report_lines(name, done)) + "\n", encoding="utf-8")
+    return f"{yara_sources.summary(done)}; commit {commit[:12]}"
+
+
+def fetch_one(name, section, out, shared=None):
     kind = section.get("kind", "")
     url = section.get("url", "")
     if kind not in KINDS or not url:
@@ -101,6 +167,8 @@ def fetch_one(name, section, out):
     rules_dir, intel_dir, reports = out / "suricata" / "rules", out / "zeek" / "intel" / name, out / "reports"
     detail = ""
 
+    if kind == "yara-git":
+        return fetch_yara(name, section, out, {} if shared is None else shared)
     if kind in ("snort-git", "suricata-git", "intel-git"):
         with tempfile.TemporaryDirectory() as folder:
             commit = git_fetch(url, section.get("commit", ""), folder)
@@ -197,7 +265,7 @@ def main():
         shutil.rmtree(args.out)
     args.out.mkdir(parents=True)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    manifest, failed = [f"External sources fetched {stamp}", ""], 0
+    manifest, failed, shared, yara_status = [f"External sources fetched {stamp}", ""], 0, {}, []
     for name in config.sections():
         section = config[name]
         if only is not None and name not in only:
@@ -205,16 +273,22 @@ def main():
         if only is None and not section.getboolean("enabled", fallback=False):
             continue
         try:
-            result = fetch_one(name, section, args.out)
+            result = fetch_one(name, section, args.out, shared)
             status = "ok"
         except SourceError as error:
             result, status, failed = str(error), "FAILED", failed + 1
         except subprocess.TimeoutExpired:
             result, status, failed = "timed out", "FAILED", failed + 1
+        except (OSError, ValueError) as error:                   # a file that cannot be read or written, odd text
+            result, status, failed = f"{type(error).__name__}: {error}", "FAILED", failed + 1
+        if section.get("kind") == "yara-git":
+            yara_status.append(f"{name} {status}")
         print(f"[{status}] {name}: {result}", file=sys.stderr)
         manifest += [f"{name}  [{status}]", f"  {section.get('about', '')}", f"  from: {section.get('url', '')}",
                      f"  licence: {section.get('licence', 'not stated')}", f"  result: {result}", ""]
     (args.out / "SOURCES.txt").write_text("\n".join(manifest), encoding="utf-8")
+    # Read by collect-content.sh: YARA rule sets go into the product together or not at all (tools/yara_sources.py).
+    (args.out / "yara-sources.txt").write_text("".join(line + "\n" for line in yara_status), encoding="utf-8")
     return 1 if failed else 0
 
 

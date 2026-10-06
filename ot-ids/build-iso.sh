@@ -34,6 +34,8 @@ FETCH_SOURCES="${FETCH_SOURCES:-true}"             # true = download the sources
 ZEEK_L2_WATCH="${ZEEK_L2_WATCH:-true}"             # true = add the layer 2 (ARP) watch if the product's Zeek accepts it
 ATTACK_ICS_TAGS="${ATTACK_ICS_TAGS:-true}"         # true = write each rule's MITRE ATT&CK for ICS technique into the rule
 OT_BASELINE="${OT_BASELINE:-true}"                 # true = add the baseline program (learns what is normal; its alerts start switched off)
+SURICATA_PROTOCOL_EVENTS="${SURICATA_PROTOCOL_EVENTS:-true}"   # true = switch on Suricata's own Modbus, DNP3 and EtherNet/IP event rules
+SURICATA_STREAM_DEPTH="${SURICATA_STREAM_DEPTH-0}" # how far into a connection Suricata's decoders read; 0 = to its end; empty = the product's 1mb
 HARDENING="${HARDENING:-true}"                     # true = add the files under hardening/ to the ISO
 HARDEN_SHELL_TIMEOUT="${HARDEN_SHELL_TIMEOUT:-900}"        # seconds before an idle SSH/console shell closes; 0 = never
 HARDEN_USB_STORAGE_OFF="${HARDEN_USB_STORAGE_OFF:-false}"  # true = block USB sticks (also blocks updates by USB)
@@ -54,6 +56,8 @@ need() { command -v "$1" >/dev/null 2>&1 || die "'$1' is required but not instal
 [[ "$BRAND_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9\ ._-]{0,39}$ ]] || \
   die "BRAND_NAME may only contain letters, digits, space, dot, underscore and dash (max 40 chars)."
 [[ "$HARDEN_SHELL_TIMEOUT" =~ ^[0-9]+$ ]] || die "HARDEN_SHELL_TIMEOUT must be a number of seconds."
+[[ -z "$SURICATA_STREAM_DEPTH" || "$SURICATA_STREAM_DEPTH" =~ ^(0|[1-9][0-9]*(kb|mb|gb))$ ]] || \
+  die "SURICATA_STREAM_DEPTH must be 0, a size such as 16mb, or empty."
 BRAND_SLUG="$(printf '%s' "$BRAND_NAME" | tr '[:upper:] ' '[:lower:]-')"
 
 for F in $FLAVORS; do
@@ -82,6 +86,19 @@ resolve_build_mode() {
     BUILD_MODE=vagrant
   fi
   log "Build mode: $BUILD_MODE"
+}
+
+# set_env_value <file> <NAME> <value>: set NAME=value in one of the product's
+# environment files, replacing the line if the name is already there.
+set_env_value() {
+  local file="$1" name="$2" value="$3"
+  [[ -f "$file" ]] || return 1
+  if grep -q "^${name}=" "$file"; then
+    sed -i "s|^${name}=.*|${name}=${value}|" "$file"
+  else
+    [[ -z "$(tail -c 1 "$file")" ]] || echo >> "$file"
+    printf '%s=%s\n' "$name" "$value" >> "$file"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -165,6 +182,21 @@ cmd_prepare() {
     log "Applied web branding (icons, banners, page titles)"
   fi
 
+  # --- Suricata: read long-lived connections to their end ------------------------
+  # The product stops Suricata's stream reassembly 1 MB into a connection
+  # (STREAM_REASSEMBLY_DEPTH in suricata/scripts/suricata_config_populate.py).
+  # A master keeps one Modbus, DNP3 or EtherNet/IP connection open for days, so
+  # the decoders, and every rule that uses them, would see only its first
+  # megabyte. Suricata's own configuration file says to set this to 0 for
+  # Modbus. The environment file templates are what the installed system starts from.
+  if [[ -n "$SURICATA_STREAM_DEPTH" ]]; then
+    set_env_value "$SRC_DIR/config/suricata.env.example" SURICATA_STREAM_REASSEMBLY_DEPTH "$SURICATA_STREAM_DEPTH" || \
+      die "config/suricata.env.example not found (layout changed in $MALCOLM_REF?)."
+    grep -q "'STREAM_REASSEMBLY_DEPTH'" "$SRC_DIR/suricata/scripts/suricata_config_populate.py" 2>/dev/null || \
+      warn "The product's Suricata set-up no longer names STREAM_REASSEMBLY_DEPTH; the setting may have no effect in $MALCOLM_REF."
+    log "Suricata stream depth set to $SURICATA_STREAM_DEPTH (the product's default is 1mb)"
+  fi
+
   # --- content overlay ------------------------------------------------------------
   # Everything under overlay/malcolm/ lands in ~/Malcolm on the installed system
   # (e.g. overlay/malcolm/suricata/rules/*.rules -> ~/Malcolm/suricata/rules/).
@@ -206,7 +238,7 @@ apply_hardening() {
   [[ "$HARDENING" == "true" ]] || { log "HARDENING is off; only the base system's hardening applies."; return 0; }
   local root="$ISO_DIR/config/includes.chroot" file
   cp -a "$KIT_DIR/hardening/rootfs/." "$root/"
-  chmod 755 "$root/usr/local/bin/td-hardening-check" "$root/usr/local/bin/td-apply-update"
+  chmod 755 "$root"/usr/local/bin/td-*
 
   for file in "$root/etc/issue" "$root/etc/issue.net"; do
     cat > "$file" <<EOF
@@ -349,6 +381,66 @@ check_rules_with_engine() {
   done
 }
 
+# The product's file scanner compiles its YARA rules again at each start, from
+# the rule files it can find, and scans with the result. With no Internet those
+# are the files in ./yara/rules alone (tools/yara_sources.py has the detail).
+# Run that same step here, in the product's own image, over the rule files
+# going into the ISO, and write down how many rules the image came with and how
+# many the scanner will have. Never stops the build.
+check_yara_with_engine() {
+  local rules_dir="$SKEL_DEST/yara/rules" report="$OUT_DIR/rule-check.txt" img out bundled after skipped files status
+  [[ -n "$(find "$rules_dir" -type f \( -name '*.yar' -o -name '*.yara' \) -print -quit 2>/dev/null)" ]] || return 0
+  mkdir -p "$OUT_DIR"
+  files="$(find "$rules_dir" -type f \( -name '*.yar' -o -name '*.yara' \) | wc -l)"
+  if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+    warn "Docker is not available, so the YARA rules were NOT compiled by the product's scanner."
+    echo "YARA rules: not checked, Docker was not available on the build host." >> "$report"
+    return 0
+  fi
+  img="$(list_images malcolm | grep '/strelka-backend:' | head -1 || true)"
+  if [[ -z "$img" ]] || ! { docker image inspect "$img" >/dev/null 2>&1 || docker pull "$img" >/dev/null 2>&1; }; then
+    warn "The file scanner's image could not be obtained, so the YARA rules were NOT compiled by it."
+    echo "YARA rules: not checked, the file scanner's image could not be obtained." >> "$report"
+    return 0
+  fi
+  # shellcheck disable=SC2016
+  out="$(docker run --rm --entrypoint /bin/bash -v "$rules_dir":/yara-rules/custom:ro "$img" -c '
+    count() { : > /tmp/td-empty; yara -q -S -C /yara-rules/rules.compiled /tmp/td-empty 2>/dev/null | grep "number of rules" | head -n 1 | tr -dc 0-9; }
+    echo "TD_BUNDLED=$(count)"
+    /usr/local/bin/yara_rules_setup.sh > /tmp/td-yara.log 2>&1
+    echo "TD_STATUS=$?"
+    echo "TD_SKIPPED=$(grep -c "^Skipping invalid YARA file" /tmp/td-yara.log)"
+    echo "TD_AFTER=$(count)"
+    grep "^Skipping invalid YARA file" /tmp/td-yara.log | head -100
+    grep -i "^Failed to compile\|^error" /tmp/td-yara.log | head -5' 2>&1 || true)"
+  bundled="$(sed -n 's/^TD_BUNDLED=\([0-9]*\)$/\1/p' <<<"$out" | head -1)"
+  after="$(sed -n 's/^TD_AFTER=\([0-9]*\)$/\1/p' <<<"$out" | head -1)"
+  skipped="$(sed -n 's/^TD_SKIPPED=\([0-9]*\)$/\1/p' <<<"$out" | head -1)"
+  status="$(sed -n 's/^TD_STATUS=\([0-9]*\)$/\1/p' <<<"$out" | head -1)"
+  if [[ -z "$bundled" || -z "$after" ]]; then
+    warn "The YARA check ran but its result could not be read. See $report"
+    { echo "YARA rules: checked with $img, but the result could not be read:"; tail -8 <<<"$out" | sed 's/^/    /'; } >> "$report"
+    return 0
+  fi
+  {
+    echo "YARA rules ($img): the image came with $bundled rules compiled in. From the $files rule files in the ISO its scanner compiles $after rules; it refused ${skipped:-0} files."
+    grep '^Skipping invalid YARA file' <<<"$out" | sed 's/^/    /' || true
+    grep -i '^Failed to compile\|^error' <<<"$out" | sed 's/^/    /' || true
+  } >> "$report"
+  if [[ "${status:-1}" -ne 0 ]]; then
+    # The product's script keeps its previous compiled set when the compile of all files together fails
+    # (most often two rule files of your own with one name in different folders, holding one rule name).
+    warn "The product's file scanner could NOT compile the YARA rule files in the ISO together; it would keep the set it has and use none of them. See $report"
+    echo "    THE COMPILE OF ALL FILES TOGETHER FAILED: none of the rule files in the ISO would be used." >> "$report"
+  elif [[ "$((after * 10))" -lt "$((bundled * 9))" ]]; then
+    warn "The installed system would scan files with $after YARA rules; the product's image came with $bundled. Check that the YARA sources in sources.conf were fetched (out/external-sources.txt). See $report"
+    echo "    FAR FEWER RULES THAN THE IMAGE CAME WITH: the rule files in the ISO take the place of the product's own set." >> "$report"
+  else
+    log "YARA rules: the scanner compiles $after rules from the ISO's files (the image came with $bundled; ${skipped:-0} files refused)."
+    [[ "$after" -ge "$bundled" ]] || echo "    A little fewer than the image came with: by default the kit leaves out the GPL source yara-cape and the rule files that state a non-commercial licence or the GPL (sources.conf)." >> "$report"
+  fi
+}
+
 # The layer 2 watch (platform/zeek/techdetechtives: ARP poisoning, an address
 # taken over by another network card, MAC flooding, ARP sweeps) is a Zeek
 # script. A script Zeek cannot load stops Zeek, and with it every traffic
@@ -401,6 +493,15 @@ coverage_report() {
   fi
   if [[ -s "$bundled" ]]; then
     inputs+=("$bundled")
+    # Suricata's own protocol event rules: say what the image really holds (tools/protocol_events.py).
+    {
+      echo "Suricata's own protocol event rules in $img:"
+      python3 "$KIT_DIR/tools/protocol_events.py" status "$bundled" | sed 's/^/    /' || true
+    } >> "$OUT_DIR/rule-check.txt"
+    if [[ "$SURICATA_PROTOCOL_EVENTS" == "true" && "$INCLUDE_IMAGES" == "true" ]] && \
+       ! python3 "$KIT_DIR/tools/protocol_events.py" status "$bundled" >/dev/null 2>&1; then
+      warn "Not all of Suricata's Modbus, DNP3 and EtherNet/IP event rules are active in the image. See $OUT_DIR/rule-check.txt (a Docker older than 23, without BuildKit, discards the change the kit makes)."
+    fi
   else
     warn "The rule set bundled in the Suricata image could not be read; the coverage report lists only the rules this kit adds."
   fi
@@ -516,6 +617,11 @@ add_platform_content() {
     # If the line cannot be added the image is still built; the program then only runs by hand.
     cp "$KIT_DIR/baseline/td_baseline.py" "$ctx/baseline/"
     echo 'COPY --chmod=644 baseline/td_baseline.py /opt/techdetechtives/td_baseline.py' >> "$ctx/Dockerfile.body"
+    if [[ -f "$KIT_DIR/baseline/td_profile.py" ]]; then
+      # The traffic profile: a report run by hand (td-profile). It reads the baseline's list to name masters and devices.
+      cp "$KIT_DIR/baseline/td_profile.py" "$ctx/baseline/"
+      echo 'COPY --chmod=644 baseline/td_profile.py /opt/techdetechtives/td_profile.py' >> "$ctx/Dockerfile.body"
+    fi
     echo "RUN f=\"\${SUPERCRONIC_CRONTAB:-/etc/crontab}\"; grep -q td_baseline.py \"\$f\" || printf '\\n%s\\n' '7,22,37,52 * * * * /usr/bin/python3 /opt/techdetechtives/td_baseline.py run' >> \"\$f\" || echo 'td-baseline: crontab not changed'" >> "$ctx/Dockerfile.body"
   fi
   if compgen -G "$src/anomaly_detectors/*.json" >/dev/null; then
@@ -529,6 +635,25 @@ add_platform_content() {
   layer_one dashboards-helper "$ctx"
 }
 
+# Switch on Suricata's own Modbus, DNP3 and EtherNet/IP event rules inside the
+# Suricata image (tools/protocol_events.py explains why they are probably off
+# and what they report). The rule file lives under a path the image declares as
+# a volume: Docker's BuildKit, the default since Docker 23, keeps a change made
+# there by a later layer; the old builder discards it. coverage_report reads
+# the file back out of the image and writes what it finds to rule-check.txt.
+add_suricata_layer() {
+  [[ "$SURICATA_PROTOCOL_EVENTS" == "true" ]] || return 0
+  local ctx="$WORK_DIR/content-ctx/suricata"
+  rm -rf "$ctx"
+  mkdir -p "$ctx"
+  cp "$KIT_DIR/tools/protocol_events.py" "$ctx/"
+  {
+    echo 'COPY --chmod=644 protocol_events.py /opt/techdetechtives/protocol_events.py'
+    echo "RUN python3 /opt/techdetechtives/protocol_events.py enable /var/lib/suricata/rules/suricata.rules || echo 'td: protocol event rules not changed'"
+  } > "$ctx/Dockerfile.body"
+  layer_one suricata "$ctx"
+}
+
 # images: pull the release's container images and pack them for the ISO
 cmd_images() {
   [[ -d "$SRC_DIR/.git" ]] || die "Run './build-iso.sh prepare' first."
@@ -536,6 +661,7 @@ cmd_images() {
     log "INCLUDE_IMAGES is not 'true'; the ISO will need Internet at first start to pull images."
     warn "Web branding, anomaly detectors and alert monitors travel inside the embedded images, so with INCLUDE_IMAGES=false the installed system will not have them."
     check_rules_with_engine
+    check_yara_with_engine
     add_zeek_scripts
     coverage_report
     attack_ics_report
@@ -559,11 +685,13 @@ cmd_images() {
     for img in "${IMAGES[@]}"; do docker pull "$img"; done
     brand_web_images
     add_platform_content
+    add_suricata_layer
     log "Packing images to $out (this takes a while) ..."
     docker save "${IMAGES[@]}" | xz -1 > "$out.partial"
     mv "$out.partial" "$out"
   done
   check_rules_with_engine
+  check_yara_with_engine
   add_zeek_scripts
   coverage_report
   attack_ics_report

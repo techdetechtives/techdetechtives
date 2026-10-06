@@ -29,6 +29,12 @@ command -v git >/dev/null 2>&1 || { echo "git is required" >&2; exit 1; }
 echo "[bundle] fetching external sources ..." >&2
 python3 "$KIT/tools/fetch_sources.py" --config "$KIT/sources.conf" --out "$WORK/fetched" || \
   echo "[bundle] WARNING: at least one source could not be fetched; the bundle is built from the rest" >&2
+# YARA rule sets go in together or not at all (tools/collect-content.sh says why). A bundle
+# made while one could not be fetched would take the YARA rules of the last update away.
+if [[ "${YARA_ALONE:-false}" != "true" && -s "$WORK/fetched/yara-sources.txt" ]] && grep -qv ' ok$' "$WORK/fetched/yara-sources.txt"; then
+  echo "[bundle] ERROR: a YARA rule source could not be fetched ($(grep -v ' ok$' "$WORK/fetched/yara-sources.txt" | cut -d' ' -f1 | tr '\n' ' ')). No bundle was written; try again when it can be reached." >&2
+  exit 1
+fi
 
 mkdir -p "$WORK/$NAME"
 "$KIT/tools/collect-content.sh" "$WORK/$NAME" "$WORK/fetched"

@@ -31,10 +31,12 @@ rule TechDetechtives_Credential_Tool_Mimikatz_Text
 rule TechDetechtives_PowerShell_Download_And_Run
 {
     meta:
-        description = "Script text that fetches content from a web address and runs it in the same file (a download cradle)"
+        description = "Script text that fetches content from a web address and runs it in the same file: as PowerShell (a download cradle), or a program or script saved and started"
         author = "TechDetechtives"
         date = "2026-10-05"
+        modified = "2026-10-06"
         severity = "medium"
+        note = "Fetching a file and starting it counts only when the address names a program or script, or the window is hidden: fetching an .msi and starting the installer is what ordinary set-up scripts do"
     strings:
         $get1 = "DownloadString(" ascii wide nocase
         $get2 = "DownloadData(" ascii wide nocase
@@ -44,10 +46,13 @@ rule TechDetechtives_PowerShell_Download_And_Run
         $run3 = "IEX (" ascii wide nocase
         $run4 = "| IEX" ascii wide nocase
         $run5 = "|IEX" ascii wide nocase
-        $run6 = "Start-Process" ascii wide nocase
+        $start = "Start-Process" ascii wide nocase
+        $program = /https?:\/\/[A-Za-z0-9.\-]{4,}[^\s"']{0,200}\.(exe|dll|scr|ps1|bat|cmd|hta|vbs|js)\b/ ascii wide nocase
+        $hidden = /-w(indowstyle)?\s+hidden/ ascii wide nocase
         $web = /https?:\/\/[A-Za-z0-9.\-]{4,}/ ascii wide
     condition:
-        filesize < 1MB and uint16(0) != 0x5A4D and 1 of ($get*) and 1 of ($run*) and $web
+        filesize < 1MB and uint16(0) != 0x5A4D and $web and
+        ((1 of ($get*) and 1 of ($run*)) or ($get3 and $start and ($program or $hidden)))
 }
 
 rule TechDetechtives_PowerShell_Encoded_Launcher

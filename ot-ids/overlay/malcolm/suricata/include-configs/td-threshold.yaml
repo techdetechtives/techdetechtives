@@ -1,0 +1,7 @@
+%YAML 1.1
+---
+# TechDetechtives OT IDS. The product adds every .yaml file in this folder to
+# Suricata's configuration. This one tells Suricata where to read alert
+# suppressions and rate limits from: the file beside it, which you can edit.
+# Inside the container this folder is /opt/suricata/include-configs.
+threshold-file: /opt/suricata/include-configs/td-threshold.config

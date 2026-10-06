@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # TechDetechtives OT IDS. Copyright (c) 2026 TechDetechtives. MIT licence (see LICENSE).
-"""Convert Snort 2.x rules into rules Suricata can load.
+"""Convert Snort 2.x rules, and the plain part of Snort 3 rules, into rules Suricata can load.
 
 Suricata rules from outside can be passed through it too: they come out
 unchanged apart from the new sid, the rate limit and the options below.
@@ -12,13 +12,25 @@ fail for one of four reasons, and this tool deals with each:
      replaced by $HOME_NET (addresses) or any (ports);
   2. Snort preprocessor keywords Suricata spells differently (modbus_func):
      rewritten;
-  3. keywords Suricata does not have (modbus_data, sip_method, ...) or Snort 3
-     syntax: the rule is set aside with the reason, not guessed at;
+  3. keywords Suricata does not have (modbus_data, sip_method, ...): the rule
+     is set aside with the reason, not guessed at;
   4. signature numbers that repeat or collide with other rule sets: every rule
      gets a new sid from --sid-base, and the original is kept in the metadata.
 
 With --limit-seconds, a rule that has no rate limit of its own is given one
 alert per source address per window, so an informational rule cannot flood.
+
+Snort 3. A Snort 3 rule that keeps the classic header (addresses and ports) is
+converted where the change is mechanical: content options with their modifiers
+after commas, "dnp3_obj: group N, var M", single-value cip_class, cip_instance,
+cip_attribute and cip_status, and iec104_asdu_func (written as bytes, because
+Suricata has no IEC 104 decoder: it then matches only a message that starts its
+packet). A rule is set aside when it has no addresses in its header (Snort 3's
+service rules), uses a Snort 3 inspector Suricata has no decoder for
+(S7CommPlus, MMS, OPC UA, IEC 104 frame types, CIP connection paths), or names
+a buffer the Snort 3 way: in Snort 3 "http_uri;" says where the options after
+it look, in Suricata the same word says where the content before it looks, so
+such a rule would load and look in the wrong place.
 
 "drop", "sdrop" and "reject" become "alert": this sensor watches, it does not
 block.
@@ -54,6 +66,46 @@ UNSUPPORTED = {
 }
 # Snort 3 only: harmless to drop.
 DROPPED = {"rem", "service"}
+# Snort 3 options that read what a Snort inspector decoded. Suricata 8 has no
+# decoder for these protocols, or no keyword for this part of one.
+SNORT3_ONLY = {
+    "s7commplus_content": "S7CommPlus", "s7commplus_func": "S7CommPlus", "s7commplus_opcode": "S7CommPlus",
+    "mms_data": "MMS (IEC 61850)", "mms_func": "MMS (IEC 61850)",
+    "opcua_msg_service": "OPC UA", "opcua_msg_type": "OPC UA", "opcua_node_id": "OPC UA", "opcua_node_namespace_index": "OPC UA",
+    "iec104_apci_type": "IEC 104 frame types",
+    "cip_conn_path_class": "CIP connection paths", "cip_req": "CIP request or response", "cip_rsp": "CIP request or response",
+    "enip_req": "EtherNet/IP request or response", "enip_rsp": "EtherNet/IP request or response",
+    "dnp3_data": "reassembled DNP3 data", "regex": "Snort 3 'regex'", "js_data": "Snort 3 buffers", "vba_data": "Snort 3 buffers",
+    "ber_data": "Snort 3 'ber_data'", "ber_skip": "Snort 3 'ber_skip'", "bufferlen": "Snort 3 'bufferlen'",
+}
+# Snort 3 writes a content option's modifiers after commas: content:"abc", depth 4, nocase;
+# Options that name a buffer and take no value. Snort 2 and Suricata write them after the content
+# they apply to; Snort 3 writes them before ("sticky"), which reads the other way round.
+BUFFER_WORDS = {
+    "http_uri", "http_raw_uri", "http_header", "http_raw_header", "http_client_body", "http_raw_body", "http_cookie",
+    "http_raw_cookie", "http_method", "http_stat_code", "http_stat_msg", "http_version", "http_trailer", "http_raw_trailer",
+    "http_true_ip", "http_param", "http_raw_request", "http_raw_status", "http_header_test", "http_trailer_test", "raw_data",
+    "sip_header", "sip_body",
+}
+CONTENT_FOLLOWERS = {"nocase", "fast_pattern", "rawbytes", "offset", "depth", "distance", "within", "isdataat", "startswith", "endswith"}
+CONTENT_FLAGS = {"nocase", "fast_pattern", "rawbytes"}
+CONTENT_NUMBERS = {"offset", "depth", "distance", "within"}
+CIP_SINGLE = {"cip_class": "enip.cip_class", "cip_instance": "enip.cip_instance", "cip_attribute": "enip.cip_attribute",
+              "cip_status": "enip.cip_status"}
+# IEC 60870-5-104 type identifications, by the names Snort 3's iec104_asdu_func takes.
+IEC104_TYPES = {
+    "m_sp_na_1": 1, "m_sp_ta_1": 2, "m_dp_na_1": 3, "m_dp_ta_1": 4, "m_st_na_1": 5, "m_st_ta_1": 6, "m_bo_na_1": 7,
+    "m_bo_ta_1": 8, "m_me_na_1": 9, "m_me_ta_1": 10, "m_me_nb_1": 11, "m_me_tb_1": 12, "m_me_nc_1": 13, "m_me_tc_1": 14,
+    "m_it_na_1": 15, "m_it_ta_1": 16, "m_ep_ta_1": 17, "m_ep_tb_1": 18, "m_ep_tc_1": 19, "m_ps_na_1": 20, "m_me_nd_1": 21,
+    "m_sp_tb_1": 30, "m_dp_tb_1": 31, "m_st_tb_1": 32, "m_bo_tb_1": 33, "m_me_td_1": 34, "m_me_te_1": 35, "m_me_tf_1": 36,
+    "m_it_tb_1": 37, "m_ep_td_1": 38, "m_ep_te_1": 39, "m_ep_tf_1": 40, "c_sc_na_1": 45, "c_dc_na_1": 46, "c_rc_na_1": 47,
+    "c_se_na_1": 48, "c_se_nb_1": 49, "c_se_nc_1": 50, "c_bo_na_1": 51, "c_sc_ta_1": 58, "c_dc_ta_1": 59, "c_rc_ta_1": 60,
+    "c_se_ta_1": 61, "c_se_tb_1": 62, "c_se_tc_1": 63, "c_bo_ta_1": 64, "m_ei_na_1": 70, "c_ic_na_1": 100, "c_ci_na_1": 101,
+    "c_rd_na_1": 102, "c_cs_na_1": 103, "c_ts_na_1": 104, "c_rp_na_1": 105, "c_cd_na_1": 106, "c_ts_ta_1": 107,
+    "p_me_na_1": 110, "p_me_nb_1": 111, "p_me_nc_1": 112, "p_ac_na_1": 113, "f_fr_na_1": 120, "f_sr_na_1": 121,
+    "f_sc_na_1": 122, "f_ls_na_1": 123, "f_af_na_1": 124, "f_sg_na_1": 125, "f_dr_ta_1": 126, "f_sc_nb_1": 127,
+}
+SERVICE_HEADER = re.compile(r"^(alert|drop|sdrop|reject|log|pass|block|rewrite)\s+\w*\s*\(")
 
 MODBUS_FUNCTIONS = {
     "read_coils": 1, "read_discrete_inputs": 2, "read_holding_registers": 3, "read_input_registers": 4,
@@ -112,6 +164,41 @@ def split_options(body):
     return parts
 
 
+def split_commas(text):
+    """Split on commas that are outside quotes."""
+    parts, current, quoted, escaped = [], "", False, False
+    for char in text:
+        if escaped:
+            current, escaped = current + char, False
+        elif char == "\\":
+            current, escaped = current + char, True
+        elif char == '"':
+            current, quoted = current + char, not quoted
+        elif char == "," and not quoted:
+            parts.append(current.strip())
+            current = ""
+        else:
+            current += char
+    parts.append(current.strip())
+    return parts
+
+
+def snort3_content(value):
+    """content:"abc", depth 4, nocase  ->  (['content:"abc"', 'depth:4', 'nocase'], None), or (None, why not)."""
+    pieces = split_commas(value)
+    options = [f"content:{pieces[0]}"]
+    for piece in pieces[1:]:
+        word, _, number = piece.partition(" ")
+        word, number = word.strip().lower(), number.strip()
+        if word in CONTENT_FLAGS and not number:
+            options.append(word)
+        elif word in CONTENT_NUMBERS and re.fullmatch(r"-?\d+|[A-Za-z_]\w*", number):
+            options.append(f"{word}:{number}")
+        else:
+            return None, f"content modifier '{piece}' has no Suricata form"
+    return options, None
+
+
 def fix_variables(field, known, fallback, notes):
     def swap(match):
         name = match.group(1)
@@ -127,7 +214,9 @@ def convert_rule(line, new_sid, source, limit_seconds=0, once_per_window=False, 
     notes = set()
     match = HEADER.match(line)
     if not match:
-        return None, "not a Snort 2 rule header (Snort 3 syntax, or a broken line)", notes
+        if SERVICE_HEADER.match(line):
+            return None, "Snort 3 rule with no addresses in its header (a service rule)", notes
+        return None, "not a rule header this tool reads (a broken line)", notes
     action, proto, src, sport, direction, dst, dport, body = match.groups()
     if action == "pass":
         return None, "pass rule (would hide traffic from other rules)", notes
@@ -142,11 +231,51 @@ def convert_rule(line, new_sid, source, limit_seconds=0, once_per_window=False, 
             return None, "a negated port variable is not defined on the sensor", notes
 
     options, modbus, original_sid, metadata = [], {}, None, None
+    snort3, buffers, after_content = False, [], False
     for option in split_options(body):
         key, _, value = option.partition(":")
         key, value = key.strip().lower(), value.strip()
+        if key in BUFFER_WORDS and not value:
+            # after a content (or its modifiers) it is the Snort 2 form; anywhere else it is Snort 3's
+            buffers.append((key, after_content))
+        if key in ("content", "uricontent", "pcre"):
+            after_content = True
+        elif key not in CONTENT_FOLLOWERS and key not in BUFFER_WORDS:
+            after_content = False
+        if key in DROPPED or key in SNORT3_ONLY or (key == "content" and len(split_commas(value)) > 1):
+            snort3 = True
         if key in UNSUPPORTED:
             return None, f"uses '{key}', which Suricata does not have", notes
+        if key in SNORT3_ONLY:
+            return None, f"uses Snort 3's '{key}': Suricata has no decoder or keyword for {SNORT3_ONLY[key]}", notes
+        if key == "content" and len(split_commas(value)) > 1:
+            converted, problem = snort3_content(value)
+            if converted is None:
+                return None, problem, notes
+            options += converted
+            notes.add("Snort 3 content modifiers written as separate options")
+            continue
+        if key == "dnp3_obj" and "group" in value.lower():
+            numbers = re.fullmatch(r"group\s+(\d+)\s*,\s*var\s+(\d+)", value.strip(), re.I)
+            if not numbers:
+                return None, f"dnp3_obj '{value}' is not 'group N, var M'", notes
+            options.append(f"dnp3_obj:{numbers.group(1)},{numbers.group(2)}")
+            notes.add("Snort 3 dnp3_obj rewritten as 'dnp3_obj:group,variation'")
+            continue
+        if key in CIP_SINGLE:
+            if not value.isdigit():
+                return None, f"{key} '{value}' is a range; only a single value is converted", notes
+            options.append(f"{CIP_SINGLE[key]}:{value}")
+            notes.add(f"Snort 3 {key} rewritten as '{CIP_SINGLE[key]}'")
+            continue
+        if key == "iec104_asdu_func":
+            number = IEC104_TYPES.get(value.strip().lower())
+            if number is None or proto.lower() != "tcp":
+                return None, f"iec104_asdu_func '{value}' is not a type this tool knows, or the rule is not a tcp rule", notes
+            # Start byte, an information frame (lowest bit of the first control byte clear), the type identification.
+            options += ['content:"|68|"', "depth:1", "byte_test:1,!&,1,2", f'content:"|{number:02x}|"', "offset:6", "depth:1"]
+            notes.add("Snort 3 iec104_asdu_func written as bytes: matches only a message that starts its packet")
+            continue
         if key in DROPPED:
             notes.add(f"dropped Snort 3 option '{key}'")
             continue
@@ -170,6 +299,10 @@ def convert_rule(line, new_sid, source, limit_seconds=0, once_per_window=False, 
             metadata = value
             continue
         options.append(option)
+    for word, follows_content in buffers:
+        if snort3 or not follows_content:
+            return None, (f"names the buffer '{word}' the Snort 3 way (before the content it applies to); "
+                          "Suricata would read it the other way round"), notes
     if original_sid is None:
         return None, "no sid", notes
     if original_sid in skip_sids:

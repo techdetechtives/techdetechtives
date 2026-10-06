@@ -13,7 +13,8 @@ and writes:
 
   - a CSV with one row per CVE and rule: number, sid, rule message, file,
     platform guess (windows / linux / ot / other), and whether the CVE is in
-    CISA's Known Exploited Vulnerabilities catalogue;
+    CISA's Known Exploited Vulnerabilities catalogue, with the date it was
+    added and whether the catalogue says ransomware campaigns use it;
   - a short summary: how many CVEs are covered per platform, and how many of
     the known-exploited ones, with the uncovered known-exploited OT entries.
 
@@ -97,10 +98,14 @@ def scan(paths):
 
 
 def load_kev(path):
-    """CISA catalogue as {cve: (vendor, product, date added)}; empty if the file is absent or unreadable."""
+    """CISA catalogue as {cve: (vendor, product, date added, ransomware use)}; empty if the file is absent or unreadable.
+
+    'ransomware use' is the catalogue's knownRansomwareCampaignUse field, "Known" or "Unknown".
+    """
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        return {item["cveID"].upper(): (item.get("vendorProject", ""), item.get("product", ""), item.get("dateAdded", ""))
+        return {item["cveID"].upper(): (item.get("vendorProject", ""), item.get("product", ""), item.get("dateAdded", ""),
+                                        str(item.get("knownRansomwareCampaignUse", "") or ""))
                 for item in data.get("vulnerabilities", [])}
     except (OSError, ValueError, KeyError, AttributeError, TypeError):
         return {}
@@ -118,10 +123,12 @@ def main():
     rows = list(scan(args.rules))
     with args.output.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["cve", "sid", "rule", "file", "platform_guess", "known_exploited", "kev_vendor", "kev_product"])
+        writer.writerow(["cve", "sid", "rule", "file", "platform_guess", "known_exploited", "kev_vendor", "kev_product",
+                         "kev_date_added", "kev_ransomware_use"])
         for cve, sid, message, name, platform in sorted(rows):
-            vendor, product, _ = kev.get(cve, ("", "", ""))
-            writer.writerow([cve, sid, message, name, platform, "yes" if cve in kev else ("no" if kev else ""), vendor, product])
+            vendor, product, added, ransomware = kev.get(cve, ("", "", "", ""))
+            writer.writerow([cve, sid, message, name, platform, "yes" if cve in kev else ("no" if kev else ""), vendor, product,
+                             added, ransomware])
 
     covered = {}
     for cve, _, _, _, platform in rows:
@@ -135,14 +142,18 @@ def main():
     lines += [f"  - {name}: {count}" for name, count in per_platform.items()]
     if kev:
         hit = sorted(cve for cve in covered if cve in kev)
+        ransomware = {cve for cve, entry in kev.items() if entry[3].strip().lower() == "known"}
         lines += ["", f"- CISA known-exploited CVEs in the catalogue: {len(kev)}",
-                  f"- Of those, covered by at least one rule: {len(hit)}"]
-        ot_gaps = sorted((added, cve, vendor, product) for cve, (vendor, product, added) in kev.items()
+                  f"- Of those, covered by at least one rule: {len(hit)}",
+                  f"- Marked in the catalogue as used by ransomware campaigns: {len(ransomware)}, of which covered: "
+                  f"{sum(1 for cve in ransomware if cve in covered)}"]
+        ot_gaps = sorted((added, cve, vendor, product, use) for cve, (vendor, product, added, use) in kev.items()
                          if cve not in covered and platform_of(f"{vendor} {product}") == "ot")
         if ot_gaps:
             lines += ["", "## Known-exploited OT vulnerabilities with no rule (newest first)", "",
-                      "| CVE | Vendor | Product | Added to the catalogue |", "| --- | --- | --- | --- |"]
-            lines += [f"| {cve} | {vendor} | {product} | {added} |" for added, cve, vendor, product in reversed(ot_gaps[-40:])]
+                      "| CVE | Vendor | Product | Added to the catalogue | Ransomware use |", "| --- | --- | --- | --- | --- |"]
+            lines += [f"| {cve} | {vendor} | {product} | {added} | {use or 'not stated'} |"
+                      for added, cve, vendor, product, use in reversed(ot_gaps[-40:])]
     elif args.kev:
         lines += ["", "- The known-exploited catalogue could not be read, so that comparison is missing."]
     summary = "\n".join(lines) + "\n"

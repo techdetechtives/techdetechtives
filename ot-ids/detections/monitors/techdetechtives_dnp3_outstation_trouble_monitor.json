@@ -1,0 +1,108 @@
+{
+  "type": "monitor",
+  "name": "TechDetechtives DNP3 Outstation Trouble Monitor",
+  "monitor_type": "query_level_monitor",
+  "enabled": false,
+  "schedule": {
+    "period": {
+      "interval": 30,
+      "unit": "MINUTES"
+    }
+  },
+  "inputs": [
+    {
+      "search": {
+        "indices": [
+          "MALCOLM_NETWORK_INDEX_PATTERN_REPLACER"
+        ],
+        "query": {
+          "size": 0,
+          "query": {
+            "bool": {
+              "filter": [
+                {
+                  "range": {
+                    "MALCOLM_NETWORK_INDEX_TIME_FIELD_REPLACER": {
+                      "from": "{{period_end}}||-30m",
+                      "to": "{{period_end}}",
+                      "include_lower": true,
+                      "include_upper": true,
+                      "format": "epoch_millis",
+                      "boost": 1
+                    }
+                  }
+                },
+                {
+                  "term": {
+                    "event.dataset": "dnp3"
+                  }
+                },
+                {
+                  "terms": {
+                    "zeek.dnp3.iin_flags": [
+                      "Device Trouble",
+                      "Configuration Corrupt",
+                      "Event Buffer Overflow",
+                      "Digital Outputs in Local"
+                    ]
+                  }
+                }
+              ],
+              "adjust_pure_negative": true,
+              "boost": 1
+            }
+          },
+          "aggregations": {
+            "outstation": {
+              "terms": {
+                "field": "destination.ip",
+                "size": 20
+              },
+              "aggregations": {
+                "flags": {
+                  "terms": {
+                    "field": "zeek.dnp3.iin_flags",
+                    "size": 16
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "query_level_trigger": {
+        "name": "TechDetechtives DNP3 Outstation Trouble",
+        "severity": "3",
+        "condition": {
+          "script": {
+            "source": "ctx.results[0].hits.total.value > 0",
+            "lang": "painless"
+          }
+        },
+        "actions": [
+          {
+            "name": "TechDetechtives DNP3 Outstation Trouble Action",
+            "destination_id": "malcolm-api-loopback-webhook",
+            "message_template": {
+              "source": "{\n  \"alert\": {\n    \"monitor\": {\n      \"name\": \"{{ctx.monitor.name}}\"\n    },\n    \"trigger\": {\n      \"name\": \"{{ctx.trigger.name}}\",\n      \"severity\": {{ctx.trigger.severity}}\n    },\n    \"period\": {\n      \"start\": \"{{ctx.periodStart}}\",\n      \"end\": \"{{ctx.periodEnd}}\"\n    },\n    \"results\": {{#toJson}}ctx.results{{/toJson}},\n    \"body\": \"{{#toJson}}ctx.payload{{/toJson}}\",\n    \"alert\": \"{{ctx.alert.id}}\",\n    \"error\": \"{{ctx.error}}\"\n  }\n}",
+              "lang": "mustache"
+            },
+            "throttle_enabled": true,
+            "subject_template": {
+              "source": "",
+              "lang": "mustache"
+            },
+            "throttle": {
+              "value": 360,
+              "unit": "MINUTES"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
