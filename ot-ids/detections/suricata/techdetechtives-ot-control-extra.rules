@@ -1,0 +1,38 @@
+# TechDetechtives OT IDS: further controller operations (Schneider UMAS,
+# Siemens S7 program transfer, IEC 60870-5-104).
+# Copyright (c) 2026 TechDetechtives. MIT licence (see LICENSE).
+# SID range reserved for this file: 1900501 - 1900599.
+#
+# These add to platform/detections/suricata/techdetechtives-ot.rules, which
+# already reports S7 stop, start and block delete, the IEC 104 reset command
+# and UMAS use as such. All rules here match bytes at fixed positions in the
+# request, because the engine has no decoder for these operations.
+#
+# UMAS is Schneider Electric's engineering protocol, carried in Modbus function
+# 90 (0x5a). Its function numbers come from public research (Kaspersky ICS CERT,
+# "The secrets of Schneider Electric's UMAS protocol", 2022), not from a vendor
+# specification. Layout: Modbus header (7 bytes), function 0x5a at byte 7,
+# session byte at 8, UMAS function at byte 9.
+#
+# These rules have passed the structure and byte-position tests in
+# ot-ids/tests/. They have not been run in the engine or against real
+# controller traffic by their author; ./build-iso.sh checks them with the
+# product's own Suricata.
+
+# --- Schneider UMAS (inside Modbus function 90) ------------------------------
+alert tcp any any -> any 502 (msg:"TECHDETECHTIVES OT UMAS - STOP sent to a Schneider controller"; flow:established,to_server; content:"|00 00|"; offset:2; depth:2; content:"|5a|"; offset:7; depth:1; content:"|41|"; offset:9; depth:1; classtype:attempted-dos; priority:1; sid:1900501; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+alert tcp any any -> any 502 (msg:"TECHDETECHTIVES OT UMAS - START sent to a Schneider controller"; flow:established,to_server; content:"|00 00|"; offset:2; depth:2; content:"|5a|"; offset:7; depth:1; content:"|40|"; offset:9; depth:1; classtype:attempted-admin; priority:2; sid:1900502; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+alert tcp any any -> any 502 (msg:"TECHDETECHTIVES OT UMAS - Program download to a Schneider controller begins"; flow:established,to_server; content:"|00 00|"; offset:2; depth:2; content:"|5a|"; offset:7; depth:1; content:"|33|"; offset:9; depth:1; classtype:attempted-admin; priority:1; sid:1900503; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+alert tcp any any -> any 502 (msg:"TECHDETECHTIVES OT UMAS - Program read out of a Schneider controller begins"; flow:established,to_server; content:"|00 00|"; offset:2; depth:2; content:"|5a|"; offset:7; depth:1; content:"|30|"; offset:9; depth:1; threshold: type limit, track by_src, seconds 3600, count 1; classtype:policy-violation; priority:2; sid:1900504; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+alert tcp any any -> any 502 (msg:"TECHDETECHTIVES OT UMAS - Controller reserved for an engineering session"; flow:established,to_server; content:"|00 00|"; offset:2; depth:2; content:"|5a|"; offset:7; depth:1; content:"|10|"; offset:9; depth:1; threshold: type limit, track by_src, seconds 3600, count 1; classtype:policy-violation; priority:3; sid:1900505; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+
+# --- Siemens S7 program transfer (TPKT, COTP data, S7 job, function at byte 17) ----
+alert tcp any any -> any 102 (msg:"TECHDETECHTIVES OT S7 - Program download to a PLC requested"; flow:established,to_server; content:"|03 00|"; depth:2; content:"|02 f0 80 32 01|"; offset:4; depth:5; content:"|1a|"; offset:17; depth:1; classtype:attempted-admin; priority:1; sid:1900511; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+alert tcp any any -> any 102 (msg:"TECHDETECHTIVES OT S7 - Program read out of a PLC started"; flow:established,to_server; content:"|03 00|"; depth:2; content:"|02 f0 80 32 01|"; offset:4; depth:5; content:"|1d|"; offset:17; depth:1; threshold: type limit, track by_src, seconds 3600, count 1; classtype:policy-violation; priority:2; sid:1900512; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+alert tcp any any -> any 102 (msg:"TECHDETECHTIVES OT S7 - Downloaded block made active in a PLC"; flow:established,to_server; content:"|03 00|"; depth:2; content:"|02 f0 80 32 01|"; offset:4; depth:5; content:"|28|"; offset:17; depth:1; content:"_INSE"; distance:0; classtype:attempted-admin; priority:1; sid:1900513; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+
+# --- IEC 60870-5-104 (start byte 0x68, type identification at byte 6) --------
+alert tcp any any -> any 2404 (msg:"TECHDETECHTIVES OT IEC 104 - Data transfer stopped (STOPDT)"; flow:established,to_server; content:"|68 04 13 00 00 00|"; depth:6; threshold: type limit, track by_src, seconds 300, count 1; classtype:attempted-dos; priority:2; sid:1900521; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+alert tcp any any -> any 2404 (msg:"TECHDETECHTIVES OT IEC 104 - Clock set on a station (C_CS_NA_1)"; flow:established,to_server; content:"|68|"; depth:1; byte_test:1,!&,1,2; content:"|67|"; offset:6; depth:1; threshold: type limit, track by_src, seconds 86400, count 1; classtype:misc-activity; priority:3; sid:1900522; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+alert tcp any any -> any 2404 (msg:"TECHDETECHTIVES OT IEC 104 - Parameter activated on a station (P_AC_NA_1)"; flow:established,to_server; content:"|68|"; depth:1; byte_test:1,!&,1,2; content:"|71|"; offset:6; depth:1; classtype:attempted-admin; priority:2; sid:1900523; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+alert tcp any any -> any 2404 (msg:"TECHDETECHTIVES OT IEC 104 - File transfer with a station (types 120 to 127)"; flow:established,to_server; content:"|68|"; depth:1; byte_test:1,!&,1,2; byte_test:1,>=,120,6; byte_test:1,<=,127,6; threshold: type limit, track by_src, seconds 3600, count 1; classtype:attempted-admin; priority:2; sid:1900524; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)

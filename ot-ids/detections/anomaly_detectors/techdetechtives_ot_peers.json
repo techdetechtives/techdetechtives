@@ -1,0 +1,65 @@
+{
+  "name": "techdetechtives_ot_peers",
+  "description": "A machine talking industrial protocols to more devices than it usually does (distinct destination.ip per source.ip, OT events only)",
+  "time_field": "MALCOLM_NETWORK_INDEX_TIME_FIELD_REPLACER",
+  "indices": [
+    "MALCOLM_NETWORK_INDEX_PATTERN_REPLACER"
+  ],
+  "feature_attributes": [
+    {
+      "feature_name": "ot_peers",
+      "feature_enabled": true,
+      "aggregation_query": {
+        "ot_peers": {
+          "cardinality": {
+            "field": "destination.ip"
+          }
+        }
+      }
+    }
+  ],
+  "filter_query": {
+    "bool": {
+      "filter": [
+        {
+          "term": {
+            "event.category": {
+              "value": "ot",
+              "boost": 1
+            }
+          }
+        },
+        {
+          "exists": {
+            "field": "source.ip",
+            "boost": 1
+          }
+        },
+        {
+          "exists": {
+            "field": "destination.ip",
+            "boost": 1
+          }
+        }
+      ],
+      "adjust_pure_negative": true,
+      "boost": 1
+    }
+  },
+  "detection_interval": {
+    "period": {
+      "interval": 10,
+      "unit": "Minutes"
+    }
+  },
+  "window_delay": {
+    "period": {
+      "interval": 1,
+      "unit": "Minutes"
+    }
+  },
+  "last_update_time": 1791244800000,
+  "category_field": [
+    "source.ip"
+  ]
+}

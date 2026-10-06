@@ -1,0 +1,50 @@
+# TechDetechtives OT IDS: correlation Suricata rules.
+# Copyright (c) 2026 TechDetechtives. MIT licence (see LICENSE).
+# SID range reserved for this file: 1900451 - 1900499.
+#
+# Each alert here needs two things from the same address inside a time window.
+# A "marker" rule notes the first (it sets a flag on the address and raises no
+# alert: "noalert"); an alert rule fires on the second only if the flag is set.
+#
+#   Chain 1  an address identifies controllers, then changes or stops one
+#            within 15 minutes (flag td.ot.recon).
+#   Chain 2  a machine is being remote-controlled from outside the monitored
+#            network, then talks to a controller within 30 minutes
+#            (flag td.remote.in).
+#
+# An engineering station that inventories and then programs devices will set
+# off chain 1, and a vendor's supported remote session will set off chain 2.
+# Both are worth one look: the alert says who, and the plant knows whether it
+# was planned. Chain 2 needs HOME_NET set to your own ranges and the sensor to
+# see traffic at the network edge.
+#
+# These rules have passed the structure and byte-position tests in
+# ot-ids/tests/. They have not been run in the engine or against plant traffic
+# by their author; ./build-iso.sh checks them with the product's own Suricata.
+
+# --- Chain 1 markers: an address identifies controllers ----------------------
+alert modbus any any -> any any (msg:"TECHDETECHTIVES OT Correlation - marker, Modbus device identification read"; flow:to_server; modbus: function 43, subfunction 14; xbits:set,td.ot.recon,track ip_src,expire 900; noalert; classtype:attempted-recon; priority:3; sid:1900451; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+alert modbus any any -> any any (msg:"TECHDETECHTIVES OT Correlation - marker, Modbus Report Server ID"; flow:to_server; modbus: function 17; xbits:set,td.ot.recon,track ip_src,expire 900; noalert; classtype:attempted-recon; priority:3; sid:1900452; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+alert udp any any -> any 44818 (msg:"TECHDETECHTIVES OT Correlation - marker, EtherNet/IP List Identity"; enip_command:99; xbits:set,td.ot.recon,track ip_src,expire 900; noalert; classtype:attempted-recon; priority:3; sid:1900453; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+alert tcp any any -> any 102 (msg:"TECHDETECHTIVES OT Correlation - marker, S7 controller identity read"; flow:established,to_server; content:"|03 00|"; depth:2; content:"|02 f0 80 32 07|"; offset:4; depth:5; content:"|00 01 12 04 11 44 01|"; offset:17; depth:7; xbits:set,td.ot.recon,track ip_src,expire 900; noalert; classtype:attempted-recon; priority:3; sid:1900454; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+
+# --- Chain 1 alerts: the same address then changes or stops a controller -----
+alert modbus any any -> any any (msg:"TECHDETECHTIVES OT Correlation - Address identified controllers, then wrote to one by Modbus"; flow:to_server; modbus: access write; xbits:isset,td.ot.recon,track ip_src; threshold: type limit, track by_src, seconds 300, count 1; classtype:attempted-admin; priority:2; sid:1900461; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+alert modbus any any -> any any (msg:"TECHDETECHTIVES OT Correlation - Address identified controllers, then forced one into listen-only mode"; flow:to_server; modbus: function 8, subfunction 4; xbits:isset,td.ot.recon,track ip_src; classtype:attempted-dos; priority:1; sid:1900462; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+alert tcp any any -> any 102 (msg:"TECHDETECHTIVES OT Correlation - Address identified controllers, then sent S7 PLC STOP"; flow:established,to_server; content:"|03 00|"; depth:2; content:"|02 f0 80 32 01|"; offset:4; depth:5; content:"|29|"; offset:17; depth:1; xbits:isset,td.ot.recon,track ip_src; classtype:attempted-dos; priority:1; sid:1900463; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+alert tcp any any -> any 102 (msg:"TECHDETECHTIVES OT Correlation - Address identified controllers, then began an S7 program download"; flow:established,to_server; content:"|03 00|"; depth:2; content:"|02 f0 80 32 01|"; offset:4; depth:5; content:"|1a|"; offset:17; depth:1; xbits:isset,td.ot.recon,track ip_src; classtype:attempted-admin; priority:1; sid:1900464; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+alert tcp any any -> any 44818 (msg:"TECHDETECHTIVES OT Correlation - Address identified controllers, then sent CIP Stop"; flow:established,to_server; cip_service:7; xbits:isset,td.ot.recon,track ip_src; threshold: type limit, track by_src, seconds 300, count 1; classtype:attempted-dos; priority:1; sid:1900465; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+alert tcp any any -> any 44818 (msg:"TECHDETECHTIVES OT Correlation - Address identified controllers, then sent CIP Reset"; flow:established,to_server; cip_service:5; xbits:isset,td.ot.recon,track ip_src; threshold: type limit, track by_src, seconds 300, count 1; classtype:attempted-dos; priority:1; sid:1900466; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+alert tcp any any -> any 502 (msg:"TECHDETECHTIVES OT Correlation - Address identified controllers, then sent UMAS STOP to a Schneider controller"; flow:established,to_server; content:"|00 00|"; offset:2; depth:2; content:"|5a|"; offset:7; depth:1; content:"|41|"; offset:9; depth:1; xbits:isset,td.ot.recon,track ip_src; classtype:attempted-dos; priority:1; sid:1900467; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+
+# --- Chain 2 markers: a machine is being remote-controlled from outside -------
+# Inbound: SSH, Telnet, RDP, VNC from outside. Outbound: the relay ports of
+# TeamViewer (5938), AnyDesk (6568) and RustDesk (21115-21119), which connect
+# outwards from the controlled machine.
+alert tcp !$HOME_NET any -> $HOME_NET [22,23,3389,5900:5910] (msg:"TECHDETECHTIVES OT Correlation - marker, remote access session from outside"; flow:established,to_server; xbits:set,td.remote.in,track ip_dst,expire 1800; noalert; classtype:policy-violation; priority:3; sid:1900471; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+alert tcp $HOME_NET any -> !$HOME_NET [5938,6568,21115:21119] (msg:"TECHDETECHTIVES OT Correlation - marker, remote-control tool connected outwards"; flow:established,to_server; xbits:set,td.remote.in,track ip_src,expire 1800; noalert; classtype:policy-violation; priority:3; sid:1900472; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+
+# --- Chain 2 alerts: that machine then talks to a controller ------------------
+alert modbus $HOME_NET any -> any any (msg:"TECHDETECHTIVES OT Correlation - Remote-controlled machine wrote to a controller by Modbus"; flow:to_server; modbus: access write; xbits:isset,td.remote.in,track ip_src; threshold: type limit, track by_src, seconds 600, count 1; classtype:attempted-admin; priority:1; sid:1900475; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+alert tcp $HOME_NET any -> any 102 (msg:"TECHDETECHTIVES OT Correlation - Remote-controlled machine sent S7 PLC STOP"; flow:established,to_server; content:"|03 00|"; depth:2; content:"|02 f0 80 32 01|"; offset:4; depth:5; content:"|29|"; offset:17; depth:1; xbits:isset,td.remote.in,track ip_src; classtype:attempted-dos; priority:1; sid:1900476; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)
+alert tcp $HOME_NET any -> $HOME_NET [102,502,2404,20000,44818,55553,55555] (msg:"TECHDETECHTIVES OT Correlation - Remote-controlled machine opened a session to a controller port"; flow:established,to_server; xbits:isset,td.remote.in,track ip_src; threshold: type limit, track by_src, seconds 3600, count 1; classtype:policy-violation; priority:2; sid:1900477; rev:1; metadata:created_at 2026_10_06, updated_at 2026_10_06;)

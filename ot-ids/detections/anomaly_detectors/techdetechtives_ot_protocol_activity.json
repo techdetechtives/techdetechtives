@@ -1,0 +1,59 @@
+{
+  "name": "techdetechtives_ot_protocol_activity",
+  "description": "Unusual amount of activity for an industrial protocol, compared with that protocol's own history (network.protocol, OT events only)",
+  "time_field": "MALCOLM_NETWORK_INDEX_TIME_FIELD_REPLACER",
+  "indices": [
+    "MALCOLM_NETWORK_INDEX_PATTERN_REPLACER"
+  ],
+  "feature_attributes": [
+    {
+      "feature_name": "ot_events",
+      "feature_enabled": true,
+      "aggregation_query": {
+        "ot_events": {
+          "value_count": {
+            "field": "network.protocol"
+          }
+        }
+      }
+    }
+  ],
+  "filter_query": {
+    "bool": {
+      "filter": [
+        {
+          "term": {
+            "event.category": {
+              "value": "ot",
+              "boost": 1
+            }
+          }
+        },
+        {
+          "exists": {
+            "field": "network.protocol",
+            "boost": 1
+          }
+        }
+      ],
+      "adjust_pure_negative": true,
+      "boost": 1
+    }
+  },
+  "detection_interval": {
+    "period": {
+      "interval": 10,
+      "unit": "Minutes"
+    }
+  },
+  "window_delay": {
+    "period": {
+      "interval": 1,
+      "unit": "Minutes"
+    }
+  },
+  "last_update_time": 1791244800000,
+  "category_field": [
+    "network.protocol"
+  ]
+}

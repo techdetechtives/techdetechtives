@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# TechDetechtives OT IDS. Copyright (c) 2026 TechDetechtives. MIT licence.
+#
+# Reports whether the hardening this appliance ships with is in effect.
+# It reads settings and changes nothing. Run as root:  sudo td-hardening-check
+
+failed=0
+pass() { printf '[ ok ] %s\n' "$1"; }
+fail() { printf '[FAIL] %s\n' "$1"; failed=$((failed + 1)); }
+note() { printf '[note] %s\n' "$1"; }
+
+[[ "$(id -u)" -eq 0 ]] || { echo "Run as root: sudo td-hardening-check" >&2; exit 2; }
+
+# --- firewall ---------------------------------------------------------------
+if command -v ufw >/dev/null 2>&1; then
+  status="$(ufw status verbose 2>/dev/null)"
+  if grep -q '^Status: active' <<<"$status"; then pass "firewall is on"; else fail "firewall is off (ufw)"; fi
+  if grep -q 'Default: deny (incoming)' <<<"$status"; then pass "firewall refuses incoming connections unless allowed"; else fail "firewall default for incoming is not 'deny'"; fi
+else
+  fail "ufw is not installed"
+fi
+
+# --- remote login -----------------------------------------------------------
+if command -v sshd >/dev/null 2>&1 && effective="$(sshd -T 2>/dev/null)"; then
+  setting() { awk -v key="$1" '$1 == key { print $2; exit }' <<<"$effective"; }
+  [[ "$(setting permitrootlogin)" == "no" ]] && pass "SSH: root cannot log in" || fail "SSH: root login is allowed"
+  [[ "$(setting permitemptypasswords)" == "no" ]] && pass "SSH: empty passwords refused" || fail "SSH: empty passwords allowed"
+  [[ "$(setting x11forwarding)" == "no" ]] && pass "SSH: X11 forwarding off" || fail "SSH: X11 forwarding on"
+  [[ "$(setting allowtcpforwarding)" == "no" ]] && pass "SSH: port forwarding off" || fail "SSH: port forwarding on"
+  if [[ "$(setting passwordauthentication)" == "no" ]]; then
+    pass "SSH: keys only, passwords refused"
+  else
+    note "SSH: password login is allowed (chosen at installation; keys are safer)"
+  fi
+else
+  note "SSH server settings could not be read"
+fi
+
+# --- kernel settings --------------------------------------------------------
+while read -r key want; do
+  have="$(sysctl -n "$key" 2>/dev/null)"
+  if [[ -z "$have" ]]; then note "kernel: $key is not available on this kernel"
+  elif [[ "$have" == "$want" ]]; then pass "kernel: $key = $want"
+  else fail "kernel: $key is $have, expected $want"; fi
+done <<'SETTINGS'
+kernel.kptr_restrict 2
+kernel.yama.ptrace_scope 1
+kernel.sysrq 0
+kernel.kexec_load_disabled 1
+kernel.unprivileged_bpf_disabled 1
+kernel.randomize_va_space 2
+fs.suid_dumpable 0
+fs.protected_symlinks 1
+fs.protected_hardlinks 1
+net.ipv4.tcp_syncookies 1
+net.ipv4.conf.all.accept_redirects 0
+net.ipv4.conf.all.accept_source_route 0
+SETTINGS
+
+# --- kernel modules ---------------------------------------------------------
+for module in dccp sctp rds tipc cramfs freevxfs jffs2 hfs hfsplus firewire-core; do
+  if modprobe -n -v "$module" 2>/dev/null | grep -q '/bin/false'; then
+    pass "module $module cannot be loaded"
+  else
+    fail "module $module is not blocked"
+  fi
+done
+if modprobe -n -v usb-storage 2>/dev/null | grep -q '/bin/false'; then
+  pass "USB storage is blocked"
+else
+  note "USB storage is allowed (needed to carry captures and rule updates by USB stick)"
+fi
+
+# --- auditing, banner, idle sessions ---------------------------------------
+if systemctl is-active --quiet auditd 2>/dev/null; then pass "audit service is running"; else fail "audit service is not running"; fi
+if [[ -s /etc/issue.net ]] && grep -qi 'authori[sz]ed' /etc/issue.net; then pass "login banner is set"; else fail "login banner is missing"; fi
+if grep -qs 'TMOUT=' /etc/profile.d/ot-ids-session-timeout.sh; then
+  pass "idle SSH and console shells are closed ($(grep -o 'TMOUT=[0-9]*' /etc/profile.d/ot-ids-session-timeout.sh | head -1 | cut -d= -f2) s)"
+else
+  note "idle SSH and console shells are not closed automatically"
+fi
+if grep -Eqs '^\s*umask\s+077' /etc/profile; then pass "new files are private to their owner (umask 077)"; else fail "umask is not 077"; fi
+
+echo
+if [[ "$failed" -eq 0 ]]; then echo "All checks passed."; else echo "$failed check(s) failed."; fi
+exit $(( failed > 0 ))

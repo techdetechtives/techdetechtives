@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# TechDetechtives OT IDS. Copyright (c) 2026 TechDetechtives. MIT licence.
+#
+# Apply an offline update made by ot-ids/tools/make-update-bundle.sh: rules,
+# YARA rules and threat indicators. Run as the account that runs the product
+# (not root), on the server and on each sensor:
+#
+#   td-apply-update /media/usb/td-update-20261006.tar.gz
+#
+# The archive's .sha256 file must be beside it. Files from the previous update
+# that are no longer in the new one are removed; your own files in the same
+# folders are left alone.
+
+set -euo pipefail
+
+BUNDLE="${1:-}"
+DIR="${MALCOLM_DIR:-$HOME/Malcolm}"
+say() { printf '[update] %s\n' "$*" >&2; }
+die() { printf '[update] ERROR: %s\n' "$*" >&2; exit 1; }
+
+[[ -n "$BUNDLE" && -f "$BUNDLE" ]] || die "usage: td-apply-update <td-update-YYYYMMDD.tar.gz>"
+[[ -d "$DIR/suricata/rules" ]] || die "$DIR does not look like the product folder (set MALCOLM_DIR)"
+[[ -f "$BUNDLE.sha256" ]] || die "$BUNDLE.sha256 is missing; copy it from the same place as the archive"
+
+(cd "$(dirname "$BUNDLE")" && sha256sum --quiet -c "$(basename "$BUNDLE").sha256") || die "checksum does not match: the archive is damaged or was changed"
+if tar -tzf "$BUNDLE" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then die "the archive contains unsafe paths"; fi
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+tar -xzf "$BUNDLE" -C "$WORK" --no-same-owner --no-same-permissions
+TOP="$(find "$WORK" -mindepth 1 -maxdepth 1 -type d | head -1)"
+[[ -n "$TOP" && -f "$TOP/MANIFEST.txt" ]] || die "not a TechDetechtives update archive"
+(cd "$TOP" && grep -E '^[0-9a-f]{64}  ' MANIFEST.txt | sha256sum --quiet -c -) || die "a file inside the archive does not match its manifest"
+
+# Remove what the previous update installed, then install this one.
+LIST="$DIR/.td-update-files"
+if [[ -f "$LIST" ]]; then
+  while IFS= read -r old; do
+    [[ -n "$old" && "$old" != /* && "$old" != *..* ]] && rm -f "$DIR/$old"
+  done < "$LIST"
+fi
+: > "$LIST.new"
+for part in suricata/rules yara/rules zeek/intel; do
+  [[ -d "$TOP/$part" ]] || continue
+  (cd "$TOP" && find "$part" -type f | sort) | while IFS= read -r file; do
+    mkdir -p "$DIR/$(dirname "$file")"
+    cp "$TOP/$file" "$DIR/$file"
+    echo "$file" >> "$LIST.new"
+  done
+done
+mv "$LIST.new" "$LIST"
+cp "$TOP/MANIFEST.txt" "$DIR/.td-update-manifest.txt"
+say "installed $(wc -l < "$LIST") files from $(head -1 "$TOP/MANIFEST.txt")"
+
+# Tell the running engines to load the new content (commands from the Malcolm documentation).
+cd "$DIR"
+running() { docker compose ps --services --status running 2>/dev/null | grep -qx "$1"; }
+if running suricata-live; then
+  docker compose exec -u "$(id -u)" suricata-live bash -c 'suricata_config_populate.py --suricata /usr/bin/suricata-offline && kill -USR2 $(pidof suricata)' \
+    && say "live Suricata reloaded its rules" || say "WARNING: live Suricata did not reload; run ./scripts/restart"
+fi
+if running suricata; then
+  docker compose exec -u "$(id -u)" suricata bash -c 'suricata_config_populate.py --suricata /usr/bin/suricata-offline && kill -USR2 $(pidof suricata-offline)' \
+    && say "Suricata (uploaded captures) reloaded its rules" || say "WARNING: Suricata did not reload; run ./scripts/restart"
+fi
+if running zeek; then
+  docker compose exec --user "$(id -u)" zeek /usr/local/bin/docker_entrypoint.sh true \
+    && say "threat indicators refreshed (live Zeek picks them up at its next refresh or restart)" || say "WARNING: indicators not refreshed; run ./scripts/restart"
+fi
+if running strelka-backend; then
+  docker compose exec -u "$(id -u)" strelka-backend /usr/local/bin/yara_rules_setup.sh \
+    && say "YARA rules reloaded" || say "WARNING: YARA rules not reloaded; run ./scripts/restart"
+fi
+say "done. If the product was stopped, the new content loads when it starts."
