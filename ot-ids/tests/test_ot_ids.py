@@ -628,15 +628,16 @@ class SourceList(unittest.TestCase):
         self.assertEqual(len(bases), len(set(bases)))
         self.assertTrue(all(abs(a - b) >= 1000 for a in bases for b in bases if a != b), "leave 1000 numbers per source")
         bundled = ["yara-signature-base", "yara-elastic", "yara-reversinglabs", "yara-sekoia", "yara-atr", "yara-bartblaze",
-                   "yara-eset", "yara-volexity"]
+                   "yara-eset", "yara-volexity", "yara-cape"]
         self.assertEqual(enabled, ["elitewolf", "quickdraw", "nmap-scans", "public-threat-feeds"] + bundled + ["cisa-kev"],
                          "sources under the GPL or custom terms stay off unless the owner turns them on")
+        owner_turned_on = {"yara-cape"}          # GPL-3.0; switched on at the owner's request in 0.14.0
         for name in config.sections():
-            if config[name]["licence"].startswith(("GPL", "AGPL", "LGPL")):
+            if config[name]["licence"].startswith(("GPL", "AGPL", "LGPL")) and name not in owner_turned_on:
                 self.assertFalse(config[name].getboolean("enabled"), f"{name}: GPL content is the owner's choice")
         # The legacy collection is listed after the sets it is compared with, or drop_known has nothing to compare.
         order = config.sections()
-        self.assertTrue(all(order.index(name) < order.index("yara-rules-legacy") for name in bundled + ["yara-cape"]))
+        self.assertTrue(all(order.index(name) < order.index("yara-rules-legacy") for name in bundled))
 
 
 class YaraSources(unittest.TestCase):
@@ -961,6 +962,24 @@ class HardeningFiles(unittest.TestCase):
             modules.append(match.group(1))
         for needed in ("usb-storage", "squashfs", "overlay", "vfat", "udf", "br_netfilter"):
             self.assertNotIn(needed, modules, f"{needed} is needed by the product or for updates by USB")
+
+    def test_each_host_command_finds_its_program(self):
+        """A host command runs a program the build puts in a container image or on the host: the two paths must agree."""
+        build = (KIT / "build-iso.sh").read_text()
+        for name in ("baseline", "profile", "replay"):
+            wrapper = (self.ROOTFS / f"usr/local/bin/td-{name}").read_text()
+            self.assertIn(f"dashboards-helper python3 /opt/techdetechtives/td_{name}.py", wrapper)
+            self.assertIn(f"COPY --chmod=644 baseline/td_{name}.py /opt/techdetechtives/td_{name}.py", build)
+            self.assertTrue((KIT / f"baseline/td_{name}.py").is_file())
+        replay = (KIT / "baseline/td_replay.py").read_text()
+        self.assertIn("import td_baseline as base", replay)
+        self.assertIn("import td_profile as profile", replay)
+        self.assertIn('-f "$KIT_DIR/baseline/td_replay.py" && -f "$KIT_DIR/baseline/td_profile.py"', build,
+                      "the replay report is only copied together with the profile it imports")
+        wrapper = (self.ROOTFS / "usr/local/bin/td-pcap-order").read_text()
+        self.assertIn("python3 /usr/local/lib/techdetechtives/td_pcap_order.py", wrapper)
+        self.assertTrue((self.ROOTFS / "usr/local/lib/techdetechtives/td_pcap_order.py").is_file())
+        self.assertIn('cp -a "$KIT_DIR/hardening/rootfs/." "$root/"', build)
 
     def test_scripts_parse(self):
         scripts = [KIT / "build-iso.sh", *sorted((KIT / "tools").glob("*.sh")), *sorted((self.ROOTFS / "usr/local/bin").iterdir())]

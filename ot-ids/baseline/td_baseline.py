@@ -115,6 +115,13 @@ SKIP_PROVIDERS = ["suricata", "malcolm"]
 # Most decoders write each message with its sender as the source and mark an
 # answer with is_orig false. The IEC 104 decoder marks direction the same way
 # but always writes the connection's two ends, so its records are not turned round.
+# A capture file handed to the product (the upload page, or the pcap/upload folder) is analysed
+# like live traffic and its records are stored beside the live ones, at the times in the capture.
+# The product names their node "<name>-upload" (its logstash/pipelines/enrichment/97_arkimize.conf
+# for Zeek and Suricata records, shared/bin/pcap_processor.py for Arkime sessions). They are not
+# what this plant's network did on its own, so the baseline does not learn from them or report on
+# them: an attack capture uploaded for study must not become "normal".
+UPLOADED = {"wildcard": {"node": {"value": "*-upload"}}}
 RESPONSE_MARKS = {"f", "false", "0", "no"}
 NOT_TURNED = {"iec104"}
 NETWORK_ERRORS = (urllib.error.URLError, http.client.HTTPException, OSError, ValueError, KeyError)
@@ -143,6 +150,8 @@ class Settings:
         self.time_field = get("MALCOLM_NETWORK_INDEX_TIME_FIELD") or "firstPacket"
         self.alert_url = get("TD_BASELINE_ALERT_URL", "http://api:5000/mapi/alert")
         self.protocols = sorted(set(PROTOCOLS) | {name.strip() for name in get("TD_BASELINE_EXTRA_PROTOCOLS", "").split(",") if name.strip()})
+        # "exclude": live traffic only (the default). "include": uploaded captures count as the plant's own traffic.
+        self.uploads = "include" if (get("TD_BASELINE_INCLUDE_UPLOADS", "") or "").strip().lower() in ("true", "1", "yes", "on") else "exclude"
         self.learn_days = env_int(environ, "TD_BASELINE_LEARN_DAYS", 14)        # learning needs this many days' worth of hours with traffic
         self.backfill_days = env_int(environ, "TD_BASELINE_BACKFILL_DAYS", 30)  # how far back the first pass reads what is already stored
         self.lag_minutes = env_int(environ, "TD_BASELINE_LAG_MINUTES", 10)      # records younger than this may still be on their way
@@ -207,8 +216,52 @@ class Http:
             return json.loads(response.read().decode() or "{}")
 
 
-def search_body(settings, start_ms, end_ms, by_hour, after=None):
+def scope_clauses(uploads="exclude", tag=None):
+    """(filters to add, exclusions to add) for one of: live traffic only ("exclude"), uploaded
+    captures only ("only"), both ("include"); and, with a tag, only records carrying that tag
+    (the product tags an uploaded capture's records with the words of its file name)."""
+    must = [{"term": {"tags": tag}}] if tag else []
+    if uploads == "only":
+        return must + [UPLOADED], []
+    return must, [UPLOADED] if uploads == "exclude" else []
+
+
+def parse_time(text):
+    """Seconds since 1970 for a UTC time written 2026-10-01, 2026-10-01T02:30 or "2026-10-01 02:30" (seconds optional)."""
+    text = str(text).strip().replace("T", " ").rstrip("Zz").strip()
+    for form in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return int(datetime.strptime(text, form).replace(tzinfo=timezone.utc).timestamp())
+        except ValueError:
+            continue
+    raise ValueError(f"'{clean(text)}' is not a time such as 2026-10-01T02:30 (UTC)")
+
+
+def time_span(http, settings, scope):
+    """(first, last) in seconds of the records inside a scope, or None when there are none.
+
+    Used to find when an uploaded capture took place: its records carry the times in the capture.
+    """
+    must, must_not = scope
+    body = {"size": 0, "track_total_hits": False, "query": {"bool": {"filter": list(must), "must_not": list(must_not)}},
+            "aggs": {"first": {"min": {"field": settings.time_field}}, "last": {"max": {"field": settings.time_field}},
+                     "end": {"max": {"field": "lastPacket"}}}}
+    url = (f"{settings.opensearch_url}/{settings.index}/_search"
+           "?ignore_unavailable=true&allow_no_indices=true&allow_partial_search_results=false")
+    reply = http.post(url, body, auth=True)
+    if reply.get("timed_out") or (reply.get("_shards") or {}).get("failed"):
+        raise ValueError("OpenSearch answered only in part (timed out, or a shard failed)")
+    found = reply.get("aggregations") or {}
+    first = (found.get("first") or {}).get("value")
+    if first is None:
+        return None
+    last = max(value for value in ((found.get("last") or {}).get("value"), (found.get("end") or {}).get("value"), first) if value is not None)
+    return int(first) // 1000, int(last) // 1000
+
+
+def search_body(settings, start_ms, end_ms, by_hour, after=None, scope=None):
     """Counts per (hour,) sender, receiver, protocol, operation and direction mark."""
+    must, must_not = scope if scope is not None else scope_clauses(settings.uploads)
     field = settings.time_field
     sources = []
     if by_hour:
@@ -233,11 +286,11 @@ def search_body(settings, start_ms, end_ms, by_hour, after=None):
                 {"terms": {"network.protocol": settings.protocols}},
                 {"exists": {"field": "source.ip"}},
                 {"exists": {"field": "destination.ip"}},
-            ],
+            ] + must,
             "must_not": [
                 {"terms": {"event.dataset": SKIP_DATASETS}},
                 {"terms": {"event.provider": SKIP_PROVIDERS}},
-            ],
+            ] + must_not,
         }},
         "aggs": {"keys": {
             "composite": composite,
@@ -246,7 +299,7 @@ def search_body(settings, start_ms, end_ms, by_hour, after=None):
     }
 
 
-def collect(http, settings, start, end, by_hour):
+def collect(http, settings, start, end, by_hour, scope=None):
     """{hour: {(client, server, protocol, operation): [count, first_ms, last_ms, asked]}} for start <= t < end (seconds).
 
     The key is always (who asked, who answered): records marked as answers are
@@ -260,7 +313,7 @@ def collect(http, settings, start, end, by_hour):
     wanted = set(settings.protocols)
     hours, after = {}, None
     while True:
-        reply = http.post(url, search_body(settings, start * 1000, end * 1000, by_hour, after), auth=True)
+        reply = http.post(url, search_body(settings, start * 1000, end * 1000, by_hour, after, scope), auth=True)
         shards = reply.get("_shards") or {}
         if reply.get("timed_out") or shards.get("failed"):
             raise ValueError("OpenSearch answered only in part (timed out, or a shard failed)")
@@ -957,6 +1010,20 @@ def main(argv=None, now=None, environ=os.environ):
         if not records:
             print("Nothing found. If the plant is running, check that the sensor sees industrial traffic "
                   "(Dashboards, ICS/IoT Security Overview).", file=out)
+        if settings.uploads == "exclude":
+            # Records marked as coming from capture files are left out. A system that analyses its own traffic from
+            # capture files (Zeek on rotated PCAP instead of the interface) has all its records marked that way.
+            try:
+                marked = collect(http_client, settings, now - HOUR - settings.lag_minutes * 60, now - settings.lag_minutes * 60,
+                                 by_hour=False, scope=scope_clauses("only"))
+                marked = len(next(iter(marked.values()), {}))
+            except NETWORK_ERRORS:
+                marked = 0
+            if marked:
+                print(f"Left out: {marked} operations in the same hour from records the product marks as read from capture files "
+                      "(node name ending in -upload). That is right for a capture uploaded for study. If this system analyses its "
+                      "own traffic from capture files instead of the capture interface (Zeek on rotated PCAP), all its traffic "
+                      "is marked so: set TD_BASELINE_INCLUDE_UPLOADS=true in config/dashboards-helper.env and restart.", file=out)
         return 0
     if command == "test-alert":
         found = finding("new-device", now, None, "192.0.2.1", "modbus", [],

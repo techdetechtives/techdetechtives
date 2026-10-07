@@ -12,6 +12,11 @@
 #   td-profile --hours 72 --top 25
 #   td-profile --format markdown > profile.md
 #   td-profile --format csv > conversations.csv      every conversation, one per line
+#   td-profile --from 2026-10-01T02:00 --to 2026-10-01T09:00     a period in the past (UTC, up to seven days)
+#   td-profile --tag incident7          an uploaded capture, by a word of its file name
+#
+# Live traffic only: capture files uploaded to the product are left out unless
+# asked for with --tag, --uploads include or --uploads only.
 #
 # Masters and devices are named from the baseline's list (td-baseline).
 
