@@ -414,19 +414,20 @@ that folder beside the kit's own:
 | `yara-sekoia` | yes | 791 | Detection Rule License 1.1 |
 | `yara-atr` (Trellix) | yes | 167 | Apache-2.0 |
 | `yara-volexity`, `yara-bartblaze`, `yara-eset` | yes | 149, 143, 138 | BSD-2-Clause, MIT, BSD-2-Clause |
-| `yara-cape` (CAPE Sandbox) | yes, since 0.14.0 | 223 | **GPL-3.0.** One rule file is left out (its rule, SparkRAT, fires on Docker's own daemon). The other sources under the GPL in `sources.conf` are off; this one was switched on by the owner. Whoever passes an ISO or update on distributes these rule files under the GPL; its text is copied beside them |
+| `yara-cape` (CAPE Sandbox; also one of the product's nine) | no | 223 | GPL-3.0. On in 0.14.0 only; the owner switched it off again in 0.14.1. One rule file stays left out if you switch it on (its rule, SparkRAT, fires on Docker's own daemon) |
 | `yara-rules-legacy` (Yara-Rules/rules, last changed 2022) | no | 1,125 after filtering | GPL-2.0 |
 
-With the defaults the scanner compiles 10,879 rules at start, from 3,315 of
-3,333 rule files, which takes about a minute on the server (measured with the
+With the defaults the scanner compiles 10,656 rules at start, from 3,155 of
+3,173 rule files, which takes about a minute on the server (measured with the
 product's own script and YARA 4.5.8; `out/rule-check.txt` has the figure from
 the product's own image after a build). A simulation of the product's own
 build gave 10,995. The two sets are close, not the same: this kit leaves out
-the rule files of signature-base that state a non-commercial licence or name
-the GPL (they hold some 340 rules; `skip_noncommercial` and `exclude` in
-`sources.conf`) and one of CAPE's, and by the count it must also keep some 220
-rules the product's build loses; which those are was not established. Each
-source is pinned to a commit;
+CAPE's rules (224 in the product's build) and the rule files of signature-base
+that state a non-commercial licence or name the GPL (they hold some 340 rules;
+`skip_noncommercial` and `exclude` in `sources.conf`), and by the count it
+must also keep some 220 rules the product's build loses; which those are was
+not established. With `yara-cape` switched on the figures are 10,879 rules
+from 3,315 of 3,333 files. Each source is pinned to a commit;
 delete a `commit` line to take that source's newest rules. Each source's
 licence file is copied beside its rules.
 
@@ -539,8 +540,7 @@ TechDetechtives rules (with their ATT&CK for ICS techniques), the enabled
 external rule sets, the YARA rule sets, indicators and the technique reference.
 A system installed from a version before 0.13.0 scans files with this kit's 21
 YARA rules alone; applying an update made with this version gives it the
-product's rule sets back, CAPE Sandbox's rules under the GPL-3.0 among them
-since 0.14.0. If a YARA source cannot be fetched, no bundle is
+product's rule sets back. If a YARA source cannot be fetched, no bundle is
 written. A bundle carries rules, YARA rules and indicators only: the stream
 depth, the protocol event rules and the suppression file reach an installed
 system with a new ISO, or by hand (`docs/LISTED-REPOSITORIES-REVIEW.md`,
@@ -623,7 +623,8 @@ on an installed system replaces those images with the plain upstream ones.
 2. Choose **Install TechDetechtives**.
    **The installer partitions and formats every non-removable disk in the
    machine without asking.** Use dedicated hardware or a dedicated VM.
-3. Answer the prompts (hostname, user, passwords). No network is needed.
+3. Answer the prompts (hostname, user, passwords). No network is needed, and
+   the installer asks for no network interface.
 4. On first boot, wait for the "loading images" dialog to finish.
 5. In a terminal:
 
@@ -648,6 +649,27 @@ on an installed system replaces those images with the plain upstream ones.
      runs full. Both are off as shipped, and the disk then fills. With one of
      them on, how far back an incident can be replayed is the size of the
      capture disk divided by your traffic.
+
+   **Network interfaces.** Nothing asks for a management interface and a
+   monitoring interface as a pair. They are set in two places (read in the
+   product's source and install guide, not tried here):
+
+   - **Management:** by you, after the first boot, with the network icon in
+     the desktop's tray (Edit Connections). No interface gets an address by
+     itself, not even by DHCP; the product recommends a static one.
+   - **Monitoring:** in `./scripts/configure`, which also opens by itself the
+     first time you log in. Answer yes to "Capture Live Network Traffic" (the
+     default is no), then name the interface under "Capture Interface(s)";
+     several are separated by commas, and nothing is preselected
+     (`ip -br link` lists the names). Then choose who reads it: "Analyze Live
+     Traffic with Zeek" and "with Suricata", and a packet capture
+     (netsniff-ng, tcpdump or Arkime). Leave "Optimize Interface Settings for
+     Capture" on for an interface used for capture alone.
+   - Give the monitoring interface no address: in the same network editor set
+     its IPv4 method to "Disabled". Use two interfaces; capturing on the
+     management interface works, and mixes the appliance's own traffic in.
+   - With a separate sensor, answer no to live capture on the server and yes
+     on the sensor.
 
 6. Browse to `https://<server address>/`.
 
@@ -689,10 +711,9 @@ drops a `techdetechtives-NOTICE.txt` in `~/Malcolm` saying what was changed.
 JA4+ (used by Zeek and Arkime in Malcolm) has its own FoxIO licence; read it
 before selling the product. Each external source keeps its own licence, listed
 in `sources.conf` and in `EXTERNAL-SOURCES.txt` on the installed system; the
-YARA rule sets carry their licence files with them. Two of those that are on by
-default need a look before you pass the product on: Elastic's is under the
-Elastic License 2.0, which is not an open-source licence, and CAPE Sandbox's
-is under the GPL-3.0.
+YARA rule sets carry their licence files with them, and one of those that are
+on by default, Elastic's, is under the Elastic License 2.0, which is not an
+open-source licence.
 `attack/ics-attack.json` and the pages made from it reproduce parts of MITRE
 ATT&CK, © 2026 The MITRE Corporation, under MITRE's ATT&CK terms of use; the
 copyright line and the licence are inside each file and must stay there. The
@@ -727,16 +748,18 @@ Run and passing in the author's environment (2026-10-07):
   11,979 rules. Neither set hit any of 7,407 ordinary files of a Linux machine.
   The namespace this kit computes for each file agreed with the script's for
   every file.
-- **New in 0.14.0.** With CAPE Sandbox's rules switched on, the product's own
-  script and YARA 4.5.8 compiled 3,315 of the 3,333 rule files (this kit's and
-  the nine default sources) into 10,879 rules in about a minute. That set hit
-  none of a sample of 7,407 files of this Linux machine (programs, libraries,
-  scripts and documents under `/usr` and `/opt`) and none of the 1,224
-  programs in `/usr/bin`, `/usr/sbin` and `/usr/libexec`; among the 82 in
+- **Measured again for 0.14.1, with CAPE off.** The product's own script and
+  YARA 4.5.8 compiled 3,155 of the 3,173 rule files (this kit's and the eight
+  default sources) into 10,656 rules in about a minute. That set hit none of
+  a sample of 7,407 files of this Linux machine (programs, libraries, scripts
+  and documents under `/usr` and `/opt`) and none of the 1,224 programs in
+  `/usr/bin`, `/usr/sbin` and `/usr/libexec`; among the 82 in
   `/usr/local/bin` one rule that names the file-transfer tool rclone found an
   rclone program, which is what it is for. The same scan finds the EICAR test
-  file. Before one CAPE rule file was left out, its rule fired on Docker's
-  daemon (found by the reviewer; the sample above did not hold that file).
+  file. With CAPE on (0.14.0) the same measurement gave 3,315 of 3,333 files
+  and 10,879 rules, with the same hits, after one CAPE rule file was left out:
+  its rule fired on Docker's daemon (found by the reviewer; the sample did
+  not hold that file).
 - The replay report (22 tests) against a stand-in for OpenSearch holding a
   made-up intrusion as records of the shapes the product stores: the list of
   uploaded captures, without the tags the product or a rule adds; a capture
@@ -815,8 +838,8 @@ Run and passing in the author's environment (2026-10-07):
   rules converted. The Nmap rule set imported from its repository: 8 rules,
   2 left out on purpose.
 - `prepare` and `sources` against the real Malcolm v26.09.0 source and the
-  thirteen GitHub-hosted sources that are on by default (three rule sets, the
-  threat feeds, nine YARA sets); the stream-depth line was read back from the
+  twelve GitHub-hosted sources that are on by default (three rule sets, the
+  threat feeds, eight YARA sets); the stream-depth line was read back from the
   prepared `config/suricata.env.example`.
 - `tools/make-update-bundle.sh`, and `td-apply-update` against a mock product
   folder: install, re-install with a stale file, and a tampered archive.
@@ -859,8 +882,7 @@ and no VM:
   the image layer that carries `td_replay.py`. `td-replay list` naming a
   capture you uploaded is the first check; `td-replay report` on a quiet hour
   of live traffic the second; one file replayed under two names, with and
-  without the restart of Suricata, the third. CAPE's rules have not been
-  compiled by the product's own YARA.
+  without the restart of Suricata, the third.
 - The count of ordinary files hit by the YARA rule sets is a rough measure from
   one Linux machine, with few Windows programs and Office documents on it.
   Rules that are quiet there can still be noisy on files from a plant.

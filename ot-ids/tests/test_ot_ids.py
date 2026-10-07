@@ -628,13 +628,13 @@ class SourceList(unittest.TestCase):
         self.assertEqual(len(bases), len(set(bases)))
         self.assertTrue(all(abs(a - b) >= 1000 for a in bases for b in bases if a != b), "leave 1000 numbers per source")
         bundled = ["yara-signature-base", "yara-elastic", "yara-reversinglabs", "yara-sekoia", "yara-atr", "yara-bartblaze",
-                   "yara-eset", "yara-volexity", "yara-cape"]
+                   "yara-eset", "yara-volexity"]
         self.assertEqual(enabled, ["elitewolf", "quickdraw", "nmap-scans", "public-threat-feeds"] + bundled + ["cisa-kev"],
                          "sources under the GPL or custom terms stay off unless the owner turns them on")
-        owner_turned_on = {"yara-cape"}          # GPL-3.0; switched on at the owner's request in 0.14.0
         for name in config.sections():
-            if config[name]["licence"].startswith(("GPL", "AGPL", "LGPL")) and name not in owner_turned_on:
+            if config[name]["licence"].startswith(("GPL", "AGPL", "LGPL")):
                 self.assertFalse(config[name].getboolean("enabled"), f"{name}: GPL content is the owner's choice")
+        self.assertEqual(config["yara-cape"].get("exclude"), "data/yara/CAPE/SparkRAT.yar", "left out for whoever switches CAPE on")
         # The legacy collection is listed after the sets it is compared with, or drop_known has nothing to compare.
         order = config.sections()
         self.assertTrue(all(order.index(name) < order.index("yara-rules-legacy") for name in bundled))

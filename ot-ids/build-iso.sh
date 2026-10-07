@@ -438,7 +438,7 @@ check_yara_with_engine() {
     echo "    FAR FEWER RULES THAN THE IMAGE CAME WITH: the rule files in the ISO take the place of the product's own set." >> "$report"
   else
     log "YARA rules: the scanner compiles $after rules from the ISO's files (the image came with $bundled; ${skipped:-0} files refused)."
-    [[ "$after" -ge "$bundled" ]] || echo "    A little fewer than the image came with: by default the kit leaves out the rule files that state a non-commercial licence or name the GPL in their header (sources.conf)." >> "$report"
+    [[ "$after" -ge "$bundled" ]] || echo "    A little fewer than the image came with: by default the kit leaves out the GPL source yara-cape and the rule files that state a non-commercial licence or name the GPL in their header (sources.conf)." >> "$report"
   fi
 }
 

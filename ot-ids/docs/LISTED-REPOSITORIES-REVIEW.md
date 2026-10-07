@@ -82,11 +82,11 @@ was a 21-rule compiled file, with the old one kept beside it as
 
 - The nine repositories are now sources in `sources.conf` (kind `yara-git`),
   fetched at build time and put in `./yara/rules` beside the kit's rules, each
-  file under a unique name. All nine are on by default since 0.14.0. The
-  ninth, CAPE Sandbox, is GPL-3.0; in 0.13.0 it was off, like every source
-  under the GPL here, and the owner then switched it on. Inside the others,
-  files that state a non-commercial licence (13, all in signature-base) or
-  name the GPL in their header (2) are left out.
+  file under a unique name. Eight are on by default. The ninth, CAPE Sandbox,
+  is GPL-3.0 and so is off unless you turn it on, like every source under the
+  GPL here (it was on in 0.14.0 only; the owner switched it off again in
+  0.14.1). Inside the eight, files that state a non-commercial licence (13,
+  all in signature-base) or name the GPL in their header (2) are left out.
 - YARA rules go in together or not at all. If any YARA source that is switched
   on could not be fetched, or none is switched on, no YARA rule goes into the
   ISO, the kit's own included, so the product keeps its compiled set; the build
@@ -103,8 +103,8 @@ module, without the cuckoo and magic modules the product's build has):
 | Rule files in `./yara/rules` | Files that compile | Rules | Start-up compile | Hits on 7,407 ordinary files |
 | --- | ---: | ---: | ---: | ---: |
 | The kit's four files alone (before) | 4 | 21 | under 1 s | 6, all one rule (now corrected, see below) |
-| The kit's files and eight sources, without CAPE (the 0.13.0 default) | 3,155 of 3,173 | 10,656 | 60 s | 0 |
-| The kit's files and all nine, one CAPE file left out (the default since 0.14.0) | 3,315 of 3,333 | 10,879 | 57 s | 0 |
+| The kit's files and the eight default sources (measured again for 0.14.1: 54 s) | 3,155 of 3,173 | 10,656 | 60 s | 0 |
+| The same and CAPE, one CAPE file left out (the 0.14.0 default) | 3,315 of 3,333 | 10,879 | 57 s | 0 |
 | The same and the optional `yara-rules-legacy` | 3,665 of 3,691 | 11,979 | 70 s | 0 |
 
 The namespace the kit computes for each file was compared with the one
@@ -116,12 +116,12 @@ Three things to know about the result:
 
 - **It is a little smaller than what the product is built with.** The reviewer
   of this change ran the product's build step over the nine repositories at the
-  pinned commits and counted 10,995 rules; the default here gives 10,879
-  (10,656 in 0.13.0, before CAPE's rules were switched on). The two sets are
-  not the product's minus a few files: the files left out here for their
-  licence hold some 340 rules, so this layout must also keep some 220 rules
-  the product's build loses. Which those are was not established. Set
-  `skip_noncommercial = no` if your use allows.
+  pinned commits and counted 10,995 rules; the default here gives 10,656.
+  The two sets are not the product's minus a few files: CAPE's rules (224)
+  and the files left out here for their licence (some 340 rules) are more
+  than the difference, so this layout must also keep some 220 rules the
+  product's build loses. Which those are was not established. Switch
+  `yara-cape` on, and set `skip_noncommercial = no`, if your use allows.
 - **Do not switch the product's own rule updates on as well.** With Internet
   access and `RULES_UPDATE_ENABLED=true` the product fetches the nine
   repositories itself, and every rule would then be compiled, and match, twice.
