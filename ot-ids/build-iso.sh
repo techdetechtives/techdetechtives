@@ -714,6 +714,10 @@ build_one_vagrant() {
 build_one_native() {
   local flavor="$1" img_arg=()
   [[ -s "$(images_file "$flavor")" ]] && img_arg=(-d "$(images_file "$flavor")")
+  # REMOVE_IMAGE_BUNDLE=true (environment, not build.conf): the upstream build deletes the image bundle once it
+  # has copied it into the ISO's file tree. For a build machine with little disk, such as a GitHub runner; a
+  # later 'iso' run then needs 'images' again.
+  [[ "${REMOVE_IMAGE_BUNDLE:-false}" == "true" && "${#img_arg[@]}" -gt 0 ]] && img_arg=(-r "${img_arg[@]}")
   mkdir -p "$ISO_DIR/shared"
   echo "VCS_REVISION=$(git -C "$SRC_DIR" rev-parse --short HEAD 2>/dev/null || echo main)" > "$ISO_DIR/shared/environment.chroot"
   (cd "$ISO_DIR" && sudo bash ./build.sh -i "$flavor" "${img_arg[@]}")
