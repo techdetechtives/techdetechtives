@@ -66,17 +66,54 @@ class Records:
         doc.update(more)
         self.docs.append(doc)
 
+    UPLOADED = {"wildcard": {"node": {"value": "*-upload"}}}
+
+    def scope(self, extra, exclusions):
+        """A test for 'is this record inside the scope', from the clauses the program adds for it."""
+        tags, only = [], False
+        for clause in extra:
+            if clause == self.UPLOADED:
+                only = True
+            elif list(clause) == ["term"] and list(clause["term"]) == ["tags"]:
+                tags.append(clause["term"]["tags"])
+            else:
+                raise ValueError("unexpected scope filter")
+        if exclusions not in ([], [self.UPLOADED]):
+            raise ValueError("unexpected exclusions")
+
+        def inside(doc):
+            uploaded = any(str(node).endswith("-upload") for node in values(doc, "node"))
+            return not (exclusions and uploaded) and not (only and not uploaded) and set(tags) <= set(values(doc, "tags"))
+        return inside
+
+    def span(self, body):
+        """The search that asks when the records of a scope took place."""
+        boolean = body["query"]["bool"]
+        if sorted(boolean) != ["filter", "must_not"] or body["aggs"] != {
+                "first": {"min": {"field": TIME_FIELD}}, "last": {"max": {"field": TIME_FIELD}}, "end": {"max": {"field": "lastPacket"}}}:
+            raise ValueError("unexpected span search")
+        inside = self.scope(boolean["filter"], boolean["must_not"])
+        docs = [doc for doc in self.docs if inside(doc)]
+        ends = [doc["lastPacket"] for doc in docs if "lastPacket" in doc]
+        return {"took": 1, "timed_out": False, "_shards": {"total": 5, "successful": 5, "failed": 0}, "aggregations": {
+            "first": {"value": float(min(doc[TIME_FIELD] for doc in docs)) if docs else None},
+            "last": {"value": float(max(doc[TIME_FIELD] for doc in docs)) if docs else None},
+            "end": {"value": float(max(ends)) if ends else None}}}
+
     def search(self, body):
         if sorted(body) != ["aggs", "query", "size", "track_total_hits"] or body["size"] != 0 or body["track_total_hits"] is not False:
             raise ValueError("unexpected search body")
+        if "keys" not in body["aggs"]:
+            return self.span(body)
         filters = body["query"]["bool"]["filter"]
-        if list(body["query"]["bool"]) != ["filter"] or len(filters) != 6:
+        if sorted(body["query"]["bool"]) != ["filter", "must_not"] or len(filters) < 6:
             raise ValueError("unexpected query")
+        inside = self.scope(filters[6:], body["query"]["bool"]["must_not"])
         began, ended = filters[0]["range"][TIME_FIELD], filters[1]["range"]["lastPacket"]
         if sorted(began) != ["format", "lt"] or sorted(ended) != ["format", "gte"] or {began["format"], ended["format"]} != {"epoch_millis"}:
             raise ValueError("unexpected range")
         time_range = {"lt": began["lt"], "gte": ended["gte"]}
-        if filters[2:] != [{"term": {"event.dataset": "conn"}}, {"term": {"event.provider": "zeek"}},
+        if filters[2:6] != [{"term": {"event.dataset": "conn"}}, {"term": {"event.provider": "zeek"}},
                            {"exists": {"field": "source.ip"}}, {"exists": {"field": "destination.ip"}}]:
             raise ValueError("unexpected filters")
         if self.no_index:
@@ -104,7 +141,7 @@ class Records:
             when = doc[TIME_FIELD]
             if not (when < time_range["lt"] and doc["lastPacket"] >= time_range["gte"]):      # open at some time in the period
                 continue
-            if doc.get("event.dataset") != "conn" or doc.get("event.provider") != "zeek":
+            if doc.get("event.dataset") != "conn" or doc.get("event.provider") != "zeek" or not inside(doc):
                 continue
             if not values(doc, "source.ip") or not values(doc, "destination.ip"):
                 continue
@@ -303,6 +340,65 @@ class Reading(ProfileCase):
         self.assertEqual(len(self.records.searches), 2)
 
 
+class PeriodsAndCaptures(ProfileCase):
+    """A period in the past, and a capture file that was uploaded to the product."""
+
+    def setUp(self):
+        super().setUp()
+        self.plant()
+        # An incident capture, uploaded today, of something that happened three weeks ago.
+        self.then = T0 - 21 * 24 * HOUR + 1800
+        for index in range(5):
+            self.records.conn(self.then + index * 600, "10.66.6.6", PLC1, 3389, "rdp", 50_000, 900_000, 300,
+                              node="malcolm-upload", tags=["incident7", "siteA"])
+        self.records.conn(self.then + 4000, "10.66.6.6", "203.0.113.200", 443, "tls", 8_000_000, 20_000, 60,
+                          node="malcolm-upload", tags=["incident7", "siteA"])
+
+    def test_live_traffic_is_the_default_and_uploads_are_left_out(self):
+        self.records.conn(T0 + 5 * HOUR, "10.66.6.6", PLC1, 3389, "rdp", node="malcolm-upload", tags=["other"])   # uploaded with today's times
+        report = self.report()
+        self.assertFalse(any(row["client"] == "10.66.6.6" for row in report["all"]))
+        self.assertEqual(report["records"], "live traffic (uploaded captures left out)")
+        self.assertTrue(any(row["client"] == "10.66.6.6" for row in self.report("--uploads", "include")["all"]))
+        only = self.report("--uploads", "only")
+        self.assertEqual({row["client"] for row in only["all"]}, {"10.66.6.6"})
+
+    def test_a_capture_is_found_by_its_tag_and_its_period_looked_up(self):
+        report = self.report("--tag", "incident7")
+        self.assertEqual((report["from"], report["to"]), (T0 - 21 * 24 * HOUR, T0 - 21 * 24 * HOUR + 2 * HOUR))
+        self.assertEqual(report["records"], "live traffic and uploaded captures, tagged incident7")
+        self.assertEqual(sorted((row["client"], row["server"], row["port"], row["connections"]) for row in report["all"]),
+                         [("10.66.6.6", PLC1, 3389, 5), ("10.66.6.6", "203.0.113.200", 443, 1)])
+        self.assertEqual([row["server"] for row in report["outside"]], ["203.0.113.200"])
+        status, out, err = self.run_profile("--tag", "incident7")
+        self.assertIn("Records: live traffic and uploaded captures, tagged incident7.", out)
+        status, out, err = self.run_profile("--tag", "nosuchtag")
+        self.assertEqual((status, out), (1, ""))
+        self.assertIn("No record carries the tag 'nosuchtag'", err)
+        status, out, err = self.run_profile("--tag", "incident7", "--uploads", "exclude")
+        self.assertEqual(status, 1)
+        self.assertIn("No live record carries the tag 'incident7' (uploaded captures were left out: --uploads include).", err)
+        # a baseline list this program cannot read costs the role names, not the report
+        for text in ("{{{", json.dumps({"hosts": ["10.0.0.5"]}), json.dumps({"hosts": {HMI: 5}})):
+            (Path(self.folder.name) / "state.json").write_text(text)
+            self.assertEqual(len(self.report("--tag", "incident7")["all"]), 2, text)
+
+    def test_a_period_in_the_past(self):
+        day = "2026-09-21"                                            # T0 is 2026-09-21 14:00 UTC
+        report = self.report("--from", f"{day}T16:20", "--to", f"{day} 19:05")
+        self.assertEqual((report["from"], report["to"]), (T0 + 2 * HOUR, T0 + 6 * HOUR), "whole hours, outwards")
+        self.assertEqual(report["hours"], 4)
+        modbus = [row for row in report["all"] if row["port"] == 502][0]
+        self.assertEqual(modbus["connections"], 4 * 6)
+        self.assertEqual(self.report("--from", f"{day}T16:00", "--hours", "2")["hours"], 2)
+        status, out, err = self.run_profile("--from", "2026-01-01", "--to", "2026-03-01")
+        self.assertEqual(status, 1)
+        self.assertIn("not between one hour and seven days", err)
+        for bad in (["--from", "yesterday"], ["--to", "2026-09-21"]):
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                td_profile.main(bad, now=T0, environ=self.environ)
+
+
 class WhatIsReported(ProfileCase):
     def setUp(self):
         super().setUp()
@@ -470,7 +566,8 @@ class Writing(ProfileCase):
         lines = out.splitlines()
         self.assertTrue(lines[0].startswith("Traffic profile, "))
         self.assertIn("(24 hours)", lines[0])
-        self.assertIn("1 industrial (left to the baseline)", lines[1])
+        self.assertEqual(lines[1], "Records: live traffic (uploaded captures left out).")
+        self.assertIn("1 industrial (left to the baseline)", lines[2])
         for title in ("Other protocols reaching controllers", "Connections opened by controllers", "Addresses outside the private ranges",
                       "Longest connections", "Largest transfers", "Steady repeaters", "Addresses that contacted many services",
                       "Attempts nobody answered", "Services"):

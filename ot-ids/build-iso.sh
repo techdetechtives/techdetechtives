@@ -239,6 +239,7 @@ apply_hardening() {
   local root="$ISO_DIR/config/includes.chroot" file
   cp -a "$KIT_DIR/hardening/rootfs/." "$root/"
   chmod 755 "$root"/usr/local/bin/td-*
+  find "$root/usr/local/lib/techdetechtives" -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
 
   for file in "$root/etc/issue" "$root/etc/issue.net"; do
     cat > "$file" <<EOF
@@ -437,7 +438,7 @@ check_yara_with_engine() {
     echo "    FAR FEWER RULES THAN THE IMAGE CAME WITH: the rule files in the ISO take the place of the product's own set." >> "$report"
   else
     log "YARA rules: the scanner compiles $after rules from the ISO's files (the image came with $bundled; ${skipped:-0} files refused)."
-    [[ "$after" -ge "$bundled" ]] || echo "    A little fewer than the image came with: by default the kit leaves out the GPL source yara-cape and the rule files that state a non-commercial licence or the GPL (sources.conf)." >> "$report"
+    [[ "$after" -ge "$bundled" ]] || echo "    A little fewer than the image came with: by default the kit leaves out the rule files that state a non-commercial licence or name the GPL in their header (sources.conf)." >> "$report"
   fi
 }
 
@@ -621,6 +622,11 @@ add_platform_content() {
       # The traffic profile: a report run by hand (td-profile). It reads the baseline's list to name masters and devices.
       cp "$KIT_DIR/baseline/td_profile.py" "$ctx/baseline/"
       echo 'COPY --chmod=644 baseline/td_profile.py /opt/techdetechtives/td_profile.py' >> "$ctx/Dockerfile.body"
+    fi
+    if [[ -f "$KIT_DIR/baseline/td_replay.py" && -f "$KIT_DIR/baseline/td_profile.py" ]]; then
+      # The incident replay report (td-replay): reads what the engines made of an uploaded capture or a period.
+      cp "$KIT_DIR/baseline/td_replay.py" "$ctx/baseline/"
+      echo 'COPY --chmod=644 baseline/td_replay.py /opt/techdetechtives/td_replay.py' >> "$ctx/Dockerfile.body"
     fi
     echo "RUN f=\"\${SUPERCRONIC_CRONTAB:-/etc/crontab}\"; grep -q td_baseline.py \"\$f\" || printf '\\n%s\\n' '7,22,37,52 * * * * /usr/bin/python3 /opt/techdetechtives/td_baseline.py run' >> \"\$f\" || echo 'td-baseline: crontab not changed'" >> "$ctx/Dockerfile.body"
   fi

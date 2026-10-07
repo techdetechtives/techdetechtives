@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# TechDetechtives OT IDS. Copyright (c) 2026 TechDetechtives. MIT licence.
+#
+# Put the packets of a capture file in the order of their times, before the
+# file is uploaded to the product to replay an incident. A capture exported
+# from Arkime is written session by session, not in time order, and an engine
+# that reads it as it is sees events in an order they did not happen in.
+#
+#   td-pcap-order EXPORT.pcap incident7.pcap     write the packets in time order to a new file
+#   td-pcap-order --check EXPORT.pcap            only say whether the file is in order
+#
+# Classic pcap files only (what Arkime exports); for pcapng use Wireshark's
+# reordercap. The program is one Python file with no dependencies and can be
+# copied to another machine: /usr/local/lib/techdetechtives/td_pcap_order.py
+
+set -euo pipefail
+exec python3 /usr/local/lib/techdetechtives/td_pcap_order.py "$@"

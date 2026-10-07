@@ -13,6 +13,8 @@ alerts: it prints a report for a person to read.
 
     td_profile.py                      the last 24 whole hours, as text (--hours 1 to 168)
     td_profile.py --hours 72 --top 25
+    td_profile.py --from 2026-10-01T02:00 --to 2026-10-01T09:00    a period in the past (UTC), such as an incident
+    td_profile.py --tag incident7      an uploaded capture, by a word of its file name; its period is looked up
     td_profile.py --format markdown --out /data/init/td-baseline/profile.md
     td_profile.py --format csv         every conversation, one per line
     td_profile.py --format json
@@ -36,6 +38,9 @@ reports (activecm/rita, GPL-3.0). None of RITA's code is used: RITA needs its
 own database and a second copy of the records, and by default drops every
 conversation between two internal addresses, which in an isolated plant is all
 of them. See ot-ids/docs/LISTED-REPOSITORIES-REVIEW.md.
+
+Which records: the live traffic the sensors saw. A capture file uploaded to
+the product is left out unless asked for with --tag or --uploads.
 
 What a period holds: every connection that was open at some time in it. A
 connection that began before the period and ended in it is counted whole, with
@@ -72,13 +77,14 @@ MAXIMA = {"longest": "length", "most_sent": "source.bytes", "most_received": "de
 END_FIELD = "lastPacket"        # the product writes it on every Zeek record: the start time plus the duration
 
 
-def search_body(settings, start_ms, end_ms, after=None):
+def search_body(settings, start_ms, end_ms, after=None, scope=None):
     """Connection records per hour of their start, client, server, server port, transport and 'still open' mark.
 
     A record carries the time its connection began, however long ago, so the
     period is matched against the connection's whole life: began before the
     period's end, last seen at or after its start.
     """
+    must, must_not = scope if scope is not None else base.scope_clauses("exclude")
     field = settings.time_field
     composite = {"size": settings.page_size, "sources": [
         {"hour": {"date_histogram": {"field": field, "fixed_interval": "1h"}}},
@@ -103,7 +109,7 @@ def search_body(settings, start_ms, end_ms, after=None):
             {"term": {"event.provider": "zeek"}},
             {"exists": {"field": "source.ip"}},
             {"exists": {"field": "destination.ip"}},
-        ]}},
+        ] + must, "must_not": list(must_not)}},
         "aggs": {"keys": {"composite": composite, "aggs": aggs}},
     }
 
@@ -113,7 +119,7 @@ def number(bucket, name):
     return int(value) if isinstance(value, (int, float)) and math.isfinite(value) else 0
 
 
-def collect(http, settings, start, end, max_buckets):
+def collect(http, settings, start, end, max_buckets, scope=None):
     """{(client, server, port, transport): conversation} for connections open between start and end (seconds),
     and whether the read was cut short.
 
@@ -130,7 +136,7 @@ def collect(http, settings, start, end, max_buckets):
            "?ignore_unavailable=true&allow_no_indices=true&allow_partial_search_results=false")
     conversations, after, read = {}, None, 0
     while True:
-        reply = http.post(url, search_body(settings, start * 1000, end * 1000, after), auth=True)
+        reply = http.post(url, search_body(settings, start * 1000, end * 1000, after, scope), auth=True)
         shards = reply.get("_shards") or {}
         if reply.get("timed_out") or shards.get("failed"):
             raise ValueError("OpenSearch answered only in part (timed out, or a shard failed)")
@@ -221,14 +227,16 @@ def roles_from_baseline(folder):
     except (OSError, ValueError, AttributeError):
         return {}
     roles = {}
-    for address, host in hosts.items():
+    for address, host in (hosts.items() if isinstance(hosts, dict) else []):
+        if not isinstance(host, dict):       # a list this program cannot read: no roles, rather than a failed report
+            return {}
         asks, answers = bool(host.get("c")), bool(host.get("s"))
         if asks or answers:
             roles[address] = "master and device" if asks and answers else "master" if asks else "device"
     return roles
 
 
-def build(conversations, roles, start, end, top=15, many=50):
+def build(conversations, roles, start, end, top=15, many=50, which="live traffic (uploaded captures left out)"):
     """The report as a dictionary: totals and the lists, each already sorted and cut to 'top'."""
     window = max(1, (end - start) // HOUR)
     first_hour = start // HOUR
@@ -306,7 +314,7 @@ def build(conversations, roles, start, end, top=15, many=50):
 
     addresses = {row["client"] for row in rows} | {row["server"] for row in rows}
     return {
-        "from": start, "to": end, "hours": window,
+        "from": start, "to": end, "hours": window, "records": which,
         "totals": {"conversations": len(rows), "industrial": len(rows) - len(others), "other": len(others),
                    "addresses": len(addresses), "connections": sum(row["connections"] for row in rows),
                    "bytes": sum(row["bytes"] for row in rows), "known_to_baseline": len(roles)},
@@ -408,6 +416,7 @@ def sections(report):
 def intro(report, cut_short):
     totals = report["totals"]
     lines = [f"Traffic profile, {stamp(report['from'])} to {stamp(report['to'])} ({report['hours']} hours)",
+             f"Records: {report['records']}.",
              f"{totals['conversations']} conversations between {totals['addresses']} addresses: {totals['industrial']} industrial "
              f"(left to the baseline), {totals['other']} other. {totals['connections']} connections, {size(totals['bytes'])}."]
     if not totals["conversations"]:
@@ -462,6 +471,11 @@ def render_csv(report):
 def main(argv=None, now=None, environ=os.environ):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--hours", type=int, default=24, help="how many whole hours back to read (1 to 168; default 24)")
+    parser.add_argument("--from", dest="start", help="start of a period in the past, UTC, such as 2026-10-01T02:00 (with --to, or --hours long)")
+    parser.add_argument("--to", dest="end", help="end of that period, UTC")
+    parser.add_argument("--tag", help="only records carrying this tag: an uploaded capture is tagged with the words of its file name")
+    parser.add_argument("--uploads", choices=("exclude", "include", "only"),
+                        help="uploaded captures: leave out (default), count with the live traffic, or nothing else (default with --tag: include)")
     parser.add_argument("--top", type=int, default=15, help="how many lines each list shows (default 15)")
     parser.add_argument("--many", type=int, default=50, help="how many destination ports make 'many services' (default 50)")
     parser.add_argument("--format", choices=("text", "markdown", "json", "csv"), default="text")
@@ -472,15 +486,46 @@ def main(argv=None, now=None, environ=os.environ):
 
     settings = base.Settings(environ)
     now = int(time.time() if now is None else now)
-    end = (now - settings.lag_minutes * 60) // HOUR * HOUR
-    start = end - args.hours * HOUR
+    uploads = args.uploads or ("include" if args.tag else "exclude")
+    scope = base.scope_clauses(uploads, args.tag)
+    which = {"exclude": "live traffic (uploaded captures left out)", "include": "live traffic and uploaded captures",
+             "only": "uploaded captures only"}[uploads] + (f", tagged {base.clean(args.tag)}" if args.tag else "")
+    http = base.Http(settings)
     max_buckets = base.env_int(environ, "TD_PROFILE_MAX_BUCKETS", 100000)     # each is a few hundred bytes of memory here
+    if args.end and not args.start:
+        parser.error("--to needs --from")
     try:
-        conversations, cut_short = collect(base.Http(settings), settings, start, end, max_buckets)
+        asked_start = base.parse_time(args.start) if args.start else None
+        asked_end = base.parse_time(args.end) if args.end else None
+    except ValueError as error:
+        parser.error(str(error))
+    try:
+        if asked_start is not None:
+            start = asked_start // HOUR * HOUR
+            end = -(-asked_end // HOUR) * HOUR if asked_end is not None else start + args.hours * HOUR
+        elif args.tag:
+            # An uploaded capture's records carry the times in the capture, whenever that was: look them up.
+            span = base.time_span(http, settings, scope)
+            if span is None:
+                where = {"exclude": "No live record carries", "only": "No uploaded record carries"}.get(uploads, "No record carries")
+                print(f"{where} the tag '{base.clean(args.tag)}'"
+                      + (" (uploaded captures were left out: --uploads include)." if uploads == "exclude" else ".")
+                      + " Tags are the words of the capture's file name (numbers and 'pcap' are not tags; capitals count); "
+                      "td-replay list shows them.", file=sys.stderr)
+                return 1
+            start, end = span[0] // HOUR * HOUR, -(-(span[1] + 1) // HOUR) * HOUR
+        else:
+            end = (now - settings.lag_minutes * 60) // HOUR * HOUR
+            start = end - args.hours * HOUR
+        if not start < end or end - start > 168 * HOUR:
+            print(f"The period {stamp(start)} to {stamp(end)} is not between one hour and seven days long. "
+                  "Give a shorter one with --from and --to.", file=sys.stderr)
+            return 1
+        conversations, cut_short = collect(http, settings, start, end, max_buckets, scope)
     except base.NETWORK_ERRORS as error:
         print(f"The connection records could not be read from OpenSearch: {base.clean(error)}", file=sys.stderr)
         return 1
-    report = build(conversations, roles_from_baseline(settings.folder), start, end, args.top, args.many)
+    report = build(conversations, roles_from_baseline(settings.folder), start, end, args.top, args.many, which)
     if args.format == "json":
         report["cut_short"] = cut_short
         text = json.dumps(report, indent=1, sort_keys=True) + "\n"

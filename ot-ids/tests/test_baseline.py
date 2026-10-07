@@ -67,9 +67,21 @@ class Platform:
         if sorted(time_range) != ["format", "gte", "lt"] or time_range["format"] != "epoch_millis":
             raise ValueError("unexpected range")
         protocols = boolean["filter"][2]["terms"]["network.protocol"]
-        if boolean["filter"][1:2] + boolean["filter"][3:] != [{"term": {"event.category": "ot"}}, {"exists": {"field": "source.ip"}},
-                                                               {"exists": {"field": "destination.ip"}}]:
+        if boolean["filter"][1:2] + boolean["filter"][3:5] != [{"term": {"event.category": "ot"}}, {"exists": {"field": "source.ip"}},
+                                                                {"exists": {"field": "destination.ip"}}]:
             raise ValueError("unexpected filters")
+        uploaded = {"wildcard": {"node": {"value": "*-upload"}}}
+        wanted_tags, only_uploads = [], False
+        for extra in boolean["filter"][5:]:                       # the scope: a tag, uploaded captures only
+            if extra == uploaded:
+                only_uploads = True
+            elif list(extra) == ["term"] and list(extra["term"]) == ["tags"]:
+                wanted_tags.append(extra["term"]["tags"])
+            else:
+                raise ValueError("unexpected scope filter")
+        if boolean["must_not"][2:] not in ([], [uploaded]):
+            raise ValueError("unexpected exclusions")
+        no_uploads = boolean["must_not"][2:] == [uploaded]
         if self.no_index:
             return {"took": 1, "timed_out": False, "_shards": {"total": 0, "successful": 0, "failed": 0}, "hits": {"hits": []}}
         skip_datasets = boolean["must_not"][0]["terms"]["event.dataset"]
@@ -104,6 +116,9 @@ class Platform:
             if not set(values(doc, "network.protocol")) & set(protocols):
                 continue
             if set(values(doc, "event.dataset")) & set(skip_datasets) or set(values(doc, "event.provider")) & set(skip_providers):
+                continue
+            is_upload = any(str(node).endswith("-upload") for node in values(doc, "node"))
+            if (no_uploads and is_upload) or (only_uploads and not is_upload) or not set(wanted_tags) <= set(values(doc, "tags")):
                 continue
             choices = []
             for name, kind, options in sources:
@@ -181,14 +196,14 @@ class Platform:
         doc.update(more)
         self.docs.append(doc)
 
-    def poll(self, first_hour, hours, client, server, protocol="modbus", action="READ_HOLDING_REGISTERS", per_hour=4, answers=True):
+    def poll(self, first_hour, hours, client, server, protocol="modbus", action="READ_HOLDING_REGISTERS", per_hour=4, answers=True, **more):
         """Steady polling: requests, and answers written the way the ICSNPP decoders write them."""
         for hour in range(first_hour, first_hour + hours):
             for step in range(per_hour):
                 when = T0 + hour * HOUR + step * (HOUR // per_hour) + 7
-                self.add(when, client, server, protocol, action, is_orig="T" if answers else None)
+                self.add(when, client, server, protocol, action, is_orig="T" if answers else None, **more)
                 if answers:
-                    self.add(when + 1, server, client, protocol, action, is_orig="F")
+                    self.add(when + 1, server, client, protocol, action, is_orig="F", **more)
 
 
 def serve(platform):
@@ -644,6 +659,73 @@ class Delivery(BaselineCase):
         self.assertEqual(self.state()["cursor"], T0 // HOUR + hours + 2, "the hours it could not read are read now")
 
 
+class UploadedCaptures(BaselineCase):
+    """A capture file handed to the product is analysed like live traffic and stored beside it,
+    at the times in the capture, with the node name "<name>-upload"."""
+
+    def ordinary(self, first_hour, hours):
+        for plc in (PLC1, PLC2, PLC3):
+            self.platform.poll(first_hour, hours, HMI, plc)
+        self.platform.poll(first_hour, hours, HMI, PLC1, action="WRITE_SINGLE_REGISTER", per_hour=2)
+
+    def test_an_uploaded_capture_is_not_learned_and_not_reported(self):
+        hours = self.learned_plant()
+        # Someone uploads a capture of an attack that carries today's times: an unknown master stopping a controller.
+        for step in range(6):
+            self.platform.add(T0 + hours * HOUR + 600 * step, "10.66.6.6", PLC1, "modbus", "WRITE_SINGLE_COIL", is_orig="T",
+                              node="malcolm-upload", tags=["incident7"])
+        self.ordinary(hours, 2)
+        self.run_hours(hours, hours + 2)
+        self.assertEqual(self.findings(), [], "an uploaded capture is not the plant's own traffic")
+        self.assertNotIn("10.66.6.6", self.state()["hosts"])
+        # The same records from the sensor itself are reported.
+        self.platform.add(T0 + (hours + 2) * HOUR + 60, "10.66.6.6", PLC1, "modbus", "WRITE_SINGLE_COIL", is_orig="T", node="sensor1")
+        self.ordinary(hours + 2, 1)
+        self.run_at(hours + 3)
+        self.assertEqual([found["kind"] for found in self.findings()], ["new-master"])
+
+    def test_an_old_capture_uploaded_before_the_first_pass_is_not_taken_for_history(self):
+        # First pass reads what is stored. A test capture uploaded last week must not become what is normal.
+        self.platform.poll(-48, 48, "10.66.6.6", PLC1, node="malcolm-upload")
+        self.platform.poll(0, 2, HMI, PLC1)
+        self.run_at(2)
+        self.assertEqual(sorted(self.state()["hosts"]), sorted([HMI, PLC1]))
+
+    def test_uploads_can_be_counted_as_the_plants_own_traffic(self):
+        self.environ["TD_BASELINE_INCLUDE_UPLOADS"] = "true"
+        self.platform.poll(0, 2, HMI, PLC1, node="malcolm-upload")
+        self.run_at(2)
+        self.assertIn(HMI, self.state()["hosts"])
+        self.assertEqual(self.platform.searches[0]["query"]["bool"]["must_not"][2:], [])
+
+    def test_check_says_when_traffic_is_marked_as_read_from_capture_files(self):
+        # A system whose Zeek analyses rotated capture files instead of the interface: the product marks ALL its
+        # records the way it marks an upload (read in its source), and the baseline would silently read nothing.
+        self.platform.poll(0, 2, HMI, PLC1, node="malcolm-upload")
+        code, out, _ = self.command("check", now=T0 + HOUR + 660)
+        self.assertEqual(code, 0)
+        self.assertIn("0 conversations and 0 operations", out)
+        self.assertIn("Left out: 1 operations in the same hour from records the product marks as read from capture files", out)
+        self.assertIn("TD_BASELINE_INCLUDE_UPLOADS=true", out)
+        for yes in ("true", "on", "YES", "1"):
+            self.environ["TD_BASELINE_INCLUDE_UPLOADS"] = yes
+            code, out, _ = self.command("check", now=T0 + HOUR + 660)
+            self.assertIn("1 conversations and 1 operations", out, yes)
+            self.assertNotIn("Left out", out)
+        self.environ["TD_BASELINE_INCLUDE_UPLOADS"] = "false"
+        self.platform.docs.clear()
+        self.platform.poll(0, 2, HMI, PLC1, node="sensor1")
+        code, out, _ = self.command("check", now=T0 + HOUR + 660)
+        self.assertNotIn("Left out", out, "live traffic only: nothing to say")
+
+    def test_scope(self):
+        uploaded = {"wildcard": {"node": {"value": "*-upload"}}}
+        self.assertEqual(td_baseline.scope_clauses(), ([], [uploaded]))
+        self.assertEqual(td_baseline.scope_clauses("include"), ([], []))
+        self.assertEqual(td_baseline.scope_clauses("only", "incident7"), ([{"term": {"tags": "incident7"}}, uploaded], []))
+        self.assertEqual(td_baseline.scope_clauses("include", "x"), ([{"term": {"tags": "x"}}], []))
+
+
 class SearchAndRecords(BaselineCase):
     def test_the_search_that_is_sent(self):
         self.platform.poll(0, 1, HMI, PLC1)
@@ -659,7 +741,8 @@ class SearchAndRecords(BaselineCase):
             {"exists": {"field": "destination.ip"}},
         ])
         self.assertEqual(body["query"]["bool"]["must_not"], [
-            {"terms": {"event.dataset": td_baseline.SKIP_DATASETS}}, {"terms": {"event.provider": ["suricata", "malcolm"]}}])
+            {"terms": {"event.dataset": td_baseline.SKIP_DATASETS}}, {"terms": {"event.provider": ["suricata", "malcolm"]}},
+            {"wildcard": {"node": {"value": "*-upload"}}}])
         self.assertIn("conn", td_baseline.SKIP_DATASETS)
         self.assertEqual(body["aggs"]["keys"]["composite"]["sources"], [
             {"hour": {"date_histogram": {"field": "firstPacket", "fixed_interval": "1h"}}},

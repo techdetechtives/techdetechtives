@@ -249,6 +249,21 @@ normal. `td-baseline forget ADDRESS` drops an address so it is reported again;
 four-hour and threefold thresholds, limits) are environment variables named
 at the top of the program; put them in `~/Malcolm/config/dashboards-helper.env`.
 
+**Uploaded captures are left out, since 0.14.0.** A capture file uploaded to
+the product for study is stored beside the live records, at the times in the
+capture. Versions 0.12.0 and 0.13.0 took one with recent times for the plant's
+own traffic: an attack capture could have taught the baseline that the attacker
+was normal, or raised alerts for a replay. It now reads live records only.
+`TD_BASELINE_INCLUDE_UPLOADS=true` restores the old behaviour. **Set it if the
+product's Zeek analyses rotated capture files instead of the capture
+interface** (not the default): the product marks all of such a system's
+records the way it marks an upload, and the baseline would read nothing;
+`td-baseline check` says so when it sees it. What an earlier version learned
+from an uploaded capture is still in its list; `td-baseline forget ADDRESS`
+drops an address. The correction is in the program, which lives in a container
+image: a system installed from 0.12.0 or 0.13.0 gets it with an ISO built from
+this version, not with an update bundle.
+
 What it cannot tell you: whether something new is wanted. A replaced HMI, a
 commissioning laptop and an intruder all arrive as "new master". Broadcast
 protocols (BACnet Who-Is, EtherNet/IP I/O to a group address) make the sender
@@ -272,7 +287,12 @@ td-profile                              # the last 24 whole hours
 td-profile --hours 72 --top 25
 td-profile --format markdown > profile.md
 td-profile --format csv > conversations.csv     # every conversation, one per line
+td-profile --from 2026-10-01T02:00 --to 2026-10-01T09:00    # a period in the past (UTC, up to seven days)
+td-profile --tag incident7              # an uploaded capture, by a word of its file name
 ```
+
+It reports on live traffic. Uploaded captures are left out unless asked for
+with `--tag`, `--uploads include` or `--uploads only`.
 
 | List | What it shows |
 | --- | --- |
@@ -294,6 +314,60 @@ synchronisation or a monitoring agent far more often than a program calling
 home; the report cannot tell which, it only makes sure someone has seen the
 list. The measures are the ones RITA reports; none of RITA's code is used
 ([`docs/LISTED-REPOSITORIES-REVIEW.md`](docs/LISTED-REPOSITORIES-REVIEW.md)).
+
+### Replaying an incident from its packets
+
+The product keeps the packets it captured, and it analyses any capture file
+you upload (`https://<server>/upload/`) with every engine again: Zeek and the
+industrial decoders, Suricata with the rules installed today, the file
+scanner. The result is stored at the times in the capture and tagged with the
+words of the file's name. So an incident can be replayed: export its packets
+from Arkime, put them in time order, upload the file, and a rule added or
+corrected since then shows what it would have said. `baseline/td_replay.py`
+reads the outcome as one account. On the server:
+
+```bash
+td-pcap-order sessions.pcap incident7.pcap   # an Arkime export is not in time order; this writes one that is
+cd ~/Malcolm && ./scripts/restart -s suricata  # before a replay that is to be compared with an earlier one
+# upload incident7.pcap at https://<server>/upload/, wait a few minutes, then:
+td-replay list                          # uploaded captures, by tag, with when their traffic took place
+td-replay report --tag incident7        # one uploaded capture (the file was named incident7.pcap)
+td-replay report --from 2026-10-01T02:00 --to 2026-10-01T09:00     # a period of live traffic (UTC, up to seven days)
+td-replay report --tag incident7 --format markdown > incident7.md
+```
+
+| Part of the report | What it shows |
+| --- | --- |
+| The course of events | The ATT&CK tactics in the order they first appeared, with the address each came from |
+| Detections in order | Rule alerts, Zeek notices and signatures, indicator matches and file-scan hits: first seen, how often, between which addresses, which technique |
+| Against the baseline | What this traffic holds that the plant's normal traffic never did: an address that was never a master, a device never spoken to, an operation never used. Works for an attack no rule was written for |
+| Other traffic | Other protocols reaching controllers, public addresses, the largest transfers (the traffic profile, cut short) |
+
+It reads and changes nothing; the baseline is only compared with.
+[`docs/INCIDENT-REPLAY.md`](docs/INCIDENT-REPLAY.md) has the procedure, a
+sample report, what each part of this kit does with a replayed capture, and
+the limits. Three things about the product decide whether a replay tells the
+truth, all read in its source and none yet tried:
+
+- **An Arkime export is written session by session, not in time order.**
+  Replayed as it is, a correlation rule can miss and a rate be miscounted.
+  `td-pcap-order` (one Python file, no dependencies; Wireshark's `reordercap`
+  does the same) puts it right.
+- **The product silently skips a file whose name and size it has processed
+  before.** Every replay needs a new file name.
+- **Suricata remembers its alert limits from one uploaded file to the next.**
+  A rule that allows one alert per address in an hour stays silent on a second
+  replay of the same traffic unless the Suricata that analyses uploads was
+  restarted (60 of the 97 rules this kit writes limit themselves that way).
+
+And four more:
+
+- Uploading what the sensor already recorded stores it twice, at the same
+  times. Filter by the tag, or by `node:*-upload`.
+- The product offers no way to remove one upload's records again.
+- The correlation rules link events inside one capture file, not across two.
+- Packets are never played back onto a network: a replayed stop command would
+  stop the controller again. Nothing in this kit or the product does that.
 
 ### Anomaly detectors and correlation monitors
 
@@ -317,8 +391,13 @@ own notification channel (e-mail, webhook).
 
 ### File-scanning rules (YARA)
 
-Files taken from the traffic are scanned with YARA, among other engines. The
-product is built with nine public rule repositories for that. **Until 0.13.0
+Files taken from the traffic are scanned with YARA, among other engines.
+**As shipped, the product takes no files from the traffic**: its File
+Extraction Mode is `none`, and with it no YARA rule ever runs, this kit's and
+the nine sets below included. Choose a mode in `./scripts/configure` (step 5
+of "Installing").
+
+The product is built with nine public rule repositories for that. **Until 0.13.0
 this kit's own 21 rules replaced them on an installed system instead of adding
 to them**: the scanner compiles its rules again at each start from the files in
 `~/Malcolm/yara/rules`, and with no Internet that folder was all it had (fault
@@ -335,15 +414,19 @@ that folder beside the kit's own:
 | `yara-sekoia` | yes | 791 | Detection Rule License 1.1 |
 | `yara-atr` (Trellix) | yes | 167 | Apache-2.0 |
 | `yara-volexity`, `yara-bartblaze`, `yara-eset` | yes | 149, 143, 138 | BSD-2-Clause, MIT, BSD-2-Clause |
-| `yara-cape` (CAPE Sandbox; also one of the product's nine) | no | 224 | GPL-3.0 |
+| `yara-cape` (CAPE Sandbox) | yes, since 0.14.0 | 223 | **GPL-3.0.** One rule file is left out (its rule, SparkRAT, fires on Docker's own daemon). The other sources under the GPL in `sources.conf` are off; this one was switched on by the owner. Whoever passes an ISO or update on distributes these rule files under the GPL; its text is copied beside them |
 | `yara-rules-legacy` (Yara-Rules/rules, last changed 2022) | no | 1,125 after filtering | GPL-2.0 |
 
-With the defaults the scanner compiles 10,656 rules at start, which takes about
-a minute on the server (measured with the product's own script and YARA 4.5.8;
-`out/rule-check.txt` has the figure from the product's own image after a
-build). By a simulation of the product's own build that is about 340 fewer than
-the product is built with: CAPE's rules and the files left out for their
-licence. Each source is pinned to a commit;
+With the defaults the scanner compiles 10,879 rules at start, from 3,315 of
+3,333 rule files, which takes about a minute on the server (measured with the
+product's own script and YARA 4.5.8; `out/rule-check.txt` has the figure from
+the product's own image after a build). A simulation of the product's own
+build gave 10,995. The two sets are close, not the same: this kit leaves out
+the rule files of signature-base that state a non-commercial licence or name
+the GPL (they hold some 340 rules; `skip_noncommercial` and `exclude` in
+`sources.conf`) and one of CAPE's, and by the count it must also keep some 220
+rules the product's build loses; which those are was not established. Each
+source is pinned to a commit;
 delete a `commit` line to take that source's newest rules. Each source's
 licence file is copied beside its rules.
 
@@ -456,7 +539,8 @@ TechDetechtives rules (with their ATT&CK for ICS techniques), the enabled
 external rule sets, the YARA rule sets, indicators and the technique reference.
 A system installed from a version before 0.13.0 scans files with this kit's 21
 YARA rules alone; applying an update made with this version gives it the
-product's rule sets back. If a YARA source cannot be fetched, no bundle is
+product's rule sets back, CAPE Sandbox's rules under the GPL-3.0 among them
+since 0.14.0. If a YARA source cannot be fetched, no bundle is
 written. A bundle carries rules, YARA rules and indicators only: the stream
 depth, the protocol event rules and the suppression file reach an installed
 system with a new ISO, or by hand (`docs/LISTED-REPOSITORIES-REVIEW.md`,
@@ -551,6 +635,20 @@ on an installed system replaces those images with the plain upstream ones.
    sudo td-hardening-check
    ```
 
+   Two answers in `./scripts/configure` where the product's default is not
+   what this kit needs:
+
+   - **File Extraction Mode** is `none` as shipped: no file is taken from the
+     traffic, so the file scanner and every YARA rule have nothing to do.
+     Choose `interesting` (or `notcommtxt`, `mapped`, `all`) and leave "Scan
+     with Strelka" on. Extracted files take disk space; "File Preservation"
+     says which are kept.
+   - **Arkime PCAP Management**, or on a system installed from the ISO
+     **Prune Oldest PCAP**, deletes the oldest captured packets when the disk
+     runs full. Both are off as shipped, and the disk then fills. With one of
+     them on, how far back an incident can be replayed is the size of the
+     capture disk divided by your traffic.
+
 6. Browse to `https://<server address>/`.
 
 Server sizing from the Malcolm project: 8 cores and 24 GB RAM minimum, 16+
@@ -567,7 +665,11 @@ cores and 32+ GB RAM recommended, and as much SSD storage as you can give it.
   fail if they fall behind the tables.
 - `baseline/td_baseline.py`: the baseline program; `attack/baseline-findings.csv`
   maps its findings to ATT&CK for ICS. `baseline/td_profile.py`: the traffic
-  profile.
+  profile. `baseline/td_replay.py`: the incident replay report.
+- `docs/INCIDENT-REPLAY.md`: what the appliance can do to replay an incident
+  from captured packets, how, and where it stops.
+- `hardening/rootfs/usr/local/lib/techdetechtives/td_pcap_order.py`: puts the
+  packets of a capture file in time order (`td-pcap-order` on the server).
 - `tools/yara_sources.py`: lays out external YARA rule files so the product
   compiles them (`check FOLDER` compiles them with the yarac on your machine).
   `tools/protocol_events.py`: says which of Suricata's own industrial event
@@ -587,9 +689,10 @@ drops a `techdetechtives-NOTICE.txt` in `~/Malcolm` saying what was changed.
 JA4+ (used by Zeek and Arkime in Malcolm) has its own FoxIO licence; read it
 before selling the product. Each external source keeps its own licence, listed
 in `sources.conf` and in `EXTERNAL-SOURCES.txt` on the installed system; the
-YARA rule sets carry their licence files with them, and one of those that are
-on by default, Elastic's, is under the Elastic License 2.0, which is not an
-open-source licence.
+YARA rule sets carry their licence files with them. Two of those that are on by
+default need a look before you pass the product on: Elastic's is under the
+Elastic License 2.0, which is not an open-source licence, and CAPE Sandbox's
+is under the GPL-3.0.
 `attack/ics-attack.json` and the pages made from it reproduce parts of MITRE
 ATT&CK, © 2026 The MITRE Corporation, under MITRE's ATT&CK terms of use; the
 copyright line and the licence are inside each file and must stay there. The
@@ -601,7 +704,7 @@ advice.
 
 Run and passing in the author's environment (2026-10-07):
 
-- `ot-ids/tests` (152 tests): rule structure and reserved numbers; every flag a
+- `ot-ids/tests` (190 tests): rule structure and reserved numbers; every flag a
   correlation alert waits for is set by a marker; byte-position rules against
   sample UMAS, S7, IEC 104, Modbus, BACnet and TFTP packets, including
   look-alikes that must not match; the nine YARA rules compiled and run by
@@ -624,11 +727,51 @@ Run and passing in the author's environment (2026-10-07):
   11,979 rules. Neither set hit any of 7,407 ordinary files of a Linux machine.
   The namespace this kit computes for each file agreed with the script's for
   every file.
-- The traffic profile (28 of the 152 tests) against a stand-in for OpenSearch
+- **New in 0.14.0.** With CAPE Sandbox's rules switched on, the product's own
+  script and YARA 4.5.8 compiled 3,315 of the 3,333 rule files (this kit's and
+  the nine default sources) into 10,879 rules in about a minute. That set hit
+  none of a sample of 7,407 files of this Linux machine (programs, libraries,
+  scripts and documents under `/usr` and `/opt`) and none of the 1,224
+  programs in `/usr/bin`, `/usr/sbin` and `/usr/libexec`; among the 82 in
+  `/usr/local/bin` one rule that names the file-transfer tool rclone found an
+  rclone program, which is what it is for. The same scan finds the EICAR test
+  file. Before one CAPE rule file was left out, its rule fired on Docker's
+  daemon (found by the reviewer; the sample above did not hold that file).
+- The replay report (22 tests) against a stand-in for OpenSearch holding a
+  made-up intrusion as records of the shapes the product stores: the list of
+  uploaded captures, without the tags the product or a rule adds; a capture
+  found by its tag with its period looked up; a period of live traffic with
+  uploads left out; a tag with a period; the tactics in order; rule alerts,
+  Zeek notices and signatures, indicator matches, file-scan hits and monitor
+  alerts; the comparison with a baseline that is only read, or that cannot be
+  read; an IPv6 master; hostile text in a rule name, on screen and in
+  Markdown; a search that fails; a report that cannot be written; every
+  output format. The ordering tool (7 tests) on capture files made byte by
+  byte: a session-by-session export, equal times, both byte orders,
+  nanosecond times, a packet cut off, 20,000 packets, and what it refuses;
+  deliberately broken copies of the tool failed them. That the baseline
+  leaves uploaded captures out, takes them when told to, and says when all
+  traffic is marked as uploaded (5 tests); the profile's periods and tags
+  (3 tests).
+- **What the product can do to replay an incident was read, not run**: in the
+  source of Malcolm 26.09.0, Suricata 8.0 and Arkime 6.7.0, file by file
+  ([`docs/INCIDENT-REPLAY.md`](docs/INCIDENT-REPLAY.md) names them).
+- An independent review of the 0.14.0 work confirmed from the same sources
+  that Zeek's, Suricata's and Arkime's records of an uploaded capture carry
+  the `-upload` node name and the file-name tags, the field names the report
+  reads, the settings quoted and the YARA numbers. It made twelve findings
+  against the first version, all corrected: three traps of replaying that the
+  first version did not know (an Arkime export is not in time order; a
+  repeated file is skipped; Suricata keeps alert limits between files); a
+  file-scan hit listed four times and an indicator match without a name,
+  because the test records had been shaped by belief and not by the product's
+  pipeline; a capture mode in which the corrected baseline would read
+  nothing; and smaller ones.
+- The traffic profile (31 of the 190 tests) against a stand-in for OpenSearch
   that answers its one search from connection records held in memory: each
   list, connections that began before the period, connections still open, a
   search that fails or answers in part, more records than one report takes,
-  hostile text, every output format.
+  hostile text, every output format, a period in the past, a capture by tag.
 - The Snort 3 conversions; the table of 67 IEC 104 type names was compared with
   Snort 3's source by program. The protocol-event tool against Suricata 8.0's
   own rule files (18 of 18 rules added to an empty file).
@@ -639,7 +782,7 @@ Run and passing in the author's environment (2026-10-07):
   version; all are corrected
   ([`docs/LISTED-REPOSITORIES-REVIEW.md`](docs/LISTED-REPOSITORIES-REVIEW.md),
   last section).
-- The baseline program (54 of the 152 tests) against a stand-in for the
+- The baseline program (59 of the 190 tests) against a stand-in for the
   product: a small web server that works out the one OpenSearch search the
   program makes from records held in memory, and takes alerts the way the
   product's webhook does. Learning, each kind of finding, late records, a
@@ -672,8 +815,8 @@ Run and passing in the author's environment (2026-10-07):
   rules converted. The Nmap rule set imported from its repository: 8 rules,
   2 left out on purpose.
 - `prepare` and `sources` against the real Malcolm v26.09.0 source and the
-  twelve GitHub-hosted sources that are on by default (three rule sets, the
-  threat feeds, eight YARA sets); the stream-depth line was read back from the
+  thirteen GitHub-hosted sources that are on by default (three rule sets, the
+  threat feeds, nine YARA sets); the stream-depth line was read back from the
   prepared `config/suricata.env.example`.
 - `tools/make-update-bundle.sh`, and `td-apply-update` against a mock product
   folder: install, re-install with a stale file, and a tampered archive.
@@ -702,6 +845,22 @@ and no VM:
   product's own script in its own image and reports); the traffic profile
   against a real OpenSearch (run `td-profile --hours 1` first: an error names
   what OpenSearch refused); the DNP3 monitor being imported.
+- **Nothing added in 0.14.0 has run in the product.** No capture has been
+  uploaded to it here. Not seen: that an uploaded capture's records carry the
+  words of its file name as tags and a node name ending in `-upload` (both
+  read in the product's source; the baseline's and the profile's leaving
+  uploads out, and `td-replay` finding a capture, rest on them); the fields
+  the replay report reads (`event.kind`, `rule.name`, `event.severity`,
+  `threat.*`) in real records, and whether OpenSearch accepts each of its
+  searches; Suricata forgetting its per-address flags and keeping its alert
+  limits between two uploaded files; the product skipping a repeated file;
+  the order of a real Arkime export, and what Suricata and Zeek make of one
+  before and after `td-pcap-order`; a file-scan hit from a replayed capture;
+  the image layer that carries `td_replay.py`. `td-replay list` naming a
+  capture you uploaded is the first check; `td-replay report` on a quiet hour
+  of live traffic the second; one file replayed under two names, with and
+  without the restart of Suricata, the third. CAPE's rules have not been
+  compiled by the product's own YARA.
 - The count of ordinary files hit by the YARA rule sets is a rough measure from
   one Linux machine, with few Windows programs and Office documents on it.
   Rules that are quiet there can still be noisy on files from a plant.
