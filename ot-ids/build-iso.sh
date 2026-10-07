@@ -468,16 +468,33 @@ add_zeek_scripts() {
     echo "Layer 2 watch (Zeek): not added, the Zeek image could not be obtained." >> "$report"
     return 0
   fi
-  if docker run --rm --entrypoint /usr/local/zeek/bin/zeek -v "$src":/kit-zeek/techdetechtives:ro "$img" \
+  # The image's zeek binary carries file capabilities (NET_RAW and NET_ADMIN, for live capture), and a container
+  # that lacks one of them cannot start it at all: "operation not permitted", which the first real build (0.14.2)
+  # took for Zeek refusing the script. Parsing needs neither capability. They are granted for this one run; where
+  # the engine cannot grant them, a copy of the binary is run instead, since a copy carries no capabilities.
+  local parsed=false zeek_bin=/usr/local/zeek/bin/zeek
+  if docker run --rm --cap-add NET_ADMIN --cap-add NET_RAW --entrypoint "$zeek_bin" -v "$src":/kit-zeek/techdetechtives:ro "$img" \
        --parse-only /kit-zeek/techdetechtives > "$WORK_DIR/zeek-test.log" 2>&1; then
+    parsed=true
+  elif grep -qi 'not permitted' "$WORK_DIR/zeek-test.log" && \
+       docker run --rm --entrypoint /bin/bash -v "$src":/kit-zeek/techdetechtives:ro "$img" \
+         -c "cp $zeek_bin /tmp/zeek-plain && /tmp/zeek-plain --parse-only /kit-zeek/techdetechtives" > "$WORK_DIR/zeek-test.log" 2>&1; then
+    parsed=true
+  fi
+  if [[ "$parsed" == "true" ]]; then
     mkdir -p "$dest/techdetechtives"
     cp "$src/l2-watch.zeek" "$src/__load__.zeek" "$dest/techdetechtives/"
     echo "@load ./techdetechtives" >> "$dest/__load__.zeek"
     log "Layer 2 watch added: $img parsed it without error."
     echo "Layer 2 watch (Zeek): added, parsed without error by $img." >> "$report"
   else
-    warn "Layer 2 watch NOT added: the product's Zeek refused it. See $report"
-    { echo "Layer 2 watch (Zeek): NOT added, $img refused it:"; tail -15 "$WORK_DIR/zeek-test.log" | sed 's/^/    /'; } >> "$report"
+    if grep -qi 'not permitted' "$WORK_DIR/zeek-test.log"; then
+      warn "Layer 2 watch NOT added: the product's Zeek could not be started to check it (not a verdict on the script). See $report"
+      { echo "Layer 2 watch (Zeek): NOT added, Zeek in $img could not be started to check it:"; tail -15 "$WORK_DIR/zeek-test.log" | sed 's/^/    /'; } >> "$report"
+    else
+      warn "Layer 2 watch NOT added: the product's Zeek refused it. See $report"
+      { echo "Layer 2 watch (Zeek): NOT added, $img refused it:"; tail -15 "$WORK_DIR/zeek-test.log" | sed 's/^/    /'; } >> "$report"
+    fi
   fi
 }
 
