@@ -85,8 +85,13 @@ files; the shared files use 1900001 to 1900399.
 
 The rate figures are starting points. An asset-inventory tool, a commissioning
 laptop or a busy master can cross them: raise the count or suppress that
-address, do not switch the rule off. The two correlation chains need `HOME_NET`
-set to your own address ranges (`./scripts/configure`), and chain 2 needs the
+address, do not switch the rule off. The two correlation chains, the boundary
+rules and the flood rules use Suricata's `HOME_NET`. As shipped it is the three
+private address ranges, so "outside" means a public address. To make it your
+own ranges, put a line such as
+`SURICATA_HOME_NET='"[10.1.0.0/16,10.2.0.0/16]"'` in
+`~/Malcolm/config/suricata.env` on the server and on each sensor and restart
+the product; `./scripts/configure` does not ask for it. Chain 2 also needs the
 sensor to see traffic at the network edge.
 
 **Quieting a rule for one address.** On the installed system,
@@ -631,7 +636,7 @@ on an installed system replaces those images with the plain upstream ones.
    ```bash
    cd ~/Malcolm
    ./scripts/auth_setup     # web admin account and certificates
-   ./scripts/configure      # capture interface, HOME_NET, storage, NetBox, retention
+   ./scripts/configure      # capture interface, storage, NetBox, retention
    ./scripts/start
    sudo td-hardening-check
    ```
