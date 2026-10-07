@@ -438,8 +438,9 @@ that folder beside the kit's own:
 With the defaults the scanner compiles 10,656 rules at start, from 3,155 of
 3,173 rule files, which takes about a minute on the server (measured with the
 product's own script and YARA 4.5.8; `out/rule-check.txt` has the figure from
-the product's own image after a build). A simulation of the product's own
-build gave 10,995. The two sets are close, not the same: this kit leaves out
+the product's own image after a build: in the first one its scanner compiled
+10,658 rules from the same files, and the image itself came with 10,971). A
+simulation of the product's own build had given 10,995. The two sets are close, not the same: this kit leaves out
 CAPE's rules (224 in the product's build) and the rule files of signature-base
 that state a non-commercial licence or name the GPL (they hold some 340 rules;
 `skip_noncommercial` and `exclude` in `sources.conf`), and by the count it
@@ -741,6 +742,40 @@ advice.
 
 ## Test status
 
+**Built for the first time on 2026-10-07**, by the GitHub Actions workflow, from
+version 0.14.2 (draft release `ot-ids-v0.14.2-build1`; its logs and reports are
+attached to it). What that build showed, and what it did not:
+
+- **Both ISOs were built**, with every container image inside: the server ISO
+  is 7.7 GB, the sensor ISO 3.7 GB. Each has a BIOS and a UEFI boot record, and
+  each, started in a virtual machine with either firmware, reached its boot
+  menu with the TechDetechtives emblem and the entries "Install
+  TechDetechtives" and "Install TechDetechtives Sensor" (pictures attached to
+  the release). **Neither ISO has been installed**: no installation was run,
+  and nothing of the product was started.
+- **The product's own Suricata loaded every rule written for this kit**: all 97,
+  in six files, none refused. Of the imported sets it loaded 52 of 52
+  (ELITEWOLF), 8 of 8 (Nmap) and 55 of 58 (Quickdraw); the three it refused use
+  a pattern option Suricata does not take, and are commented out in the ISO as
+  designed.
+- **The product's own file scanner compiled the YARA rules**: 10,658 rules from
+  the ISO's 3,173 rule files, 16 files refused. Its image came with 10,971
+  compiled in.
+- **Suricata's own protocol event rules are active in the built image**: 8 of 8
+  Modbus, 8 of 8 DNP3, 2 of 2 EtherNet/IP.
+- All seven image layers were built, the branded logo was found inside the web
+  image, the thirteen sources (CISA's catalogue among them) were downloaded,
+  and the kit's 191 tests passed on that machine.
+- The rules in that ISO name 2,565 vulnerabilities, 26 of them industrial, and
+  cover 578 of the 1,734 in CISA's known-exploited catalogue.
+- **A fault of this kit showed: the layer 2 watch is not in the ISOs of that
+  build.** The check that has the product's Zeek parse the script could not
+  start Zeek at all ("operation not permitted": the image's Zeek binary carries
+  capabilities an ordinary container run does not grant), and the build took
+  that for a refusal. Corrected in 0.14.3; until a build made from 0.14.3 or
+  later, an ISO has no ARP watch, and whether Zeek 8.2.2 parses the script is
+  still not known.
+
 Run and passing in the author's environment (2026-10-07):
 
 - `ot-ids/tests` (191 tests): rule structure and reserved numbers; every flag a
@@ -871,12 +906,12 @@ Run and passing in the author's environment (2026-10-07):
   a later run (the script is removed again), and the ATT&CK coverage report
   following suit (Adversary-in-the-Middle covered, then listed as a gap).
 
-Not run, because the author's environment has no Docker, no Suricata, no Zeek
-and no VM:
+Not run. The author's environment has no working Docker, no Suricata, no Zeek
+and no VM, and the build on GitHub stops at the ISO:
 
-- **No rule here has been loaded by Suricata.** The `images` stage does that on
-  your build host; read `out/rule-check.txt` afterwards. That includes the
-  three rules rewritten in 0.13.0.
+- **No rule here has seen traffic.** The product's Suricata loads them all
+  (above), the three rules rewritten in 0.13.0 included; loading shows a rule
+  is well formed, not that it fires when it should.
 - **Nothing added in 0.13.0 has run in the product.** Not seen: Suricata with
   stream depth 0, or reading the suppression file; the layer on the Suricata
   image, and what that image's rule file really holds (worked out from three
@@ -930,10 +965,9 @@ and no VM:
   product ships Zeek 8.2.2, which has not parsed it yet. The build decides.
 - The hardening files have not been booted. `td-hardening-check` reports what
   took effect.
-- The image downloads, the added image layers, the legacy-BIOS splash
-  conversion and the ISO build itself.
-- The GitHub Actions workflow that builds the ISOs (`ot-ids-iso.yml`) had not
-  completed a build when this was written. Its draft release holds the build
-  logs and says how far each ISO got.
+- **No ISO has been installed.** The installer, the first start, the loading of
+  the images on the installed system and everything after it have not run.
+- The build under Vagrant, and on a Debian 13 host: the one build so far ran
+  on GitHub's Ubuntu machines, the way the Malcolm project builds its own.
 
 If a stage fails, the cause is in the console output or `out/*-build.log`.
