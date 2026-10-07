@@ -42,6 +42,19 @@ git clone https://github.com/techdetechtives/techdetechtives.git && cd techdetec
 The ISOs, their checksums, the build logs and four reports land in `out/`.
 Expect well over an hour. Settings are in `build.conf`.
 
+**Without a build machine: GitHub Actions.** The workflow
+`.github/workflows/ot-ids-iso.yml` builds both ISOs on GitHub's machines, with
+every container image inside, the way the Malcolm project builds its own. Start
+it from the repository's Actions page ("ot-ids-iso", Run workflow), or change
+the file `ot-ids/.iso-build-request` and push. Each ISO takes a job of some
+hours. The result is attached to a **draft release** that only people with
+write access to the repository see: each ISO in parts of under 2 GB (the
+release's text says how to join them), its checksum, the four reports, the
+build logs, and two pictures of the ISO started in a virtual machine there.
+Publishing the draft makes the ISOs public; read "Licences" first. The
+workflow has to be on the repository's default branch before "Run workflow"
+offers it.
+
 | Stage | What it does |
 | --- | --- |
 | `./build-iso.sh prepare` | Clones the pinned Malcolm release; applies name, logo and artwork; adds the detection content (with each rule's ATT&CK for ICS technique), the Suricata settings and the hardening files |
@@ -730,7 +743,7 @@ advice.
 
 Run and passing in the author's environment (2026-10-07):
 
-- `ot-ids/tests` (190 tests): rule structure and reserved numbers; every flag a
+- `ot-ids/tests` (191 tests): rule structure and reserved numbers; every flag a
   correlation alert waits for is set by a marker; byte-position rules against
   sample UMAS, S7, IEC 104, Modbus, BACnet and TFTP packets, including
   look-alikes that must not match; the nine YARA rules compiled and run by
@@ -795,7 +808,7 @@ Run and passing in the author's environment (2026-10-07):
   because the test records had been shaped by belief and not by the product's
   pipeline; a capture mode in which the corrected baseline would read
   nothing; and smaller ones.
-- The traffic profile (31 of the 190 tests) against a stand-in for OpenSearch
+- The traffic profile (31 of the 191 tests) against a stand-in for OpenSearch
   that answers its one search from connection records held in memory: each
   list, connections that began before the period, connections still open, a
   search that fails or answers in part, more records than one report takes,
@@ -810,7 +823,7 @@ Run and passing in the author's environment (2026-10-07):
   version; all are corrected
   ([`docs/LISTED-REPOSITORIES-REVIEW.md`](docs/LISTED-REPOSITORIES-REVIEW.md),
   last section).
-- The baseline program (59 of the 190 tests) against a stand-in for the
+- The baseline program (59 of the 191 tests) against a stand-in for the
   product: a small web server that works out the one OpenSearch search the
   program makes from records held in memory, and takes alerts the way the
   product's webhook does. Learning, each kind of finding, late records, a
@@ -919,5 +932,8 @@ and no VM:
   took effect.
 - The image downloads, the added image layers, the legacy-BIOS splash
   conversion and the ISO build itself.
+- The GitHub Actions workflow that builds the ISOs (`ot-ids-iso.yml`) had not
+  completed a build when this was written. Its draft release holds the build
+  logs and says how far each ISO got.
 
 If a stage fails, the cause is in the console output or `out/*-build.log`.

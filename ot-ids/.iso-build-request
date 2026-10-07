@@ -1,0 +1,4 @@
+# Changing this file and pushing it starts .github/workflows/ot-ids-iso.yml,
+# which builds both installer ISOs and attaches them to a draft release.
+# Write a line saying when and why; the text itself is not read.
+2026-10-07  first build of the installer ISOs (0.14.2)

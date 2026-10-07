@@ -1,0 +1,271 @@
+# Builds the two bootable TechDetechtives OT IDS installer ISOs (ot-ids/), with
+# every container image inside, on GitHub's own machines, and attaches them to a
+# DRAFT release that only people with write access to this repository can see.
+#
+# Start it from the Actions page (Run workflow), or by changing
+# ot-ids/.iso-build-request and pushing.
+#
+# The steps that prepare the machine follow the workflow the Malcolm project
+# builds its own ISO with (.github/workflows/iso-build-push.yml in
+# idaholab/Malcolm): free disk space, build Debian's live-build, then run the
+# build as root. Each ISO is built by a job of its own, because one machine has
+# room for one.
+name: ot-ids-iso
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - ot-ids
+    paths:
+      - 'ot-ids/.iso-build-request'
+
+permissions:
+  contents: write          # to create the draft release and attach files to it
+
+concurrency:
+  group: ot-ids-iso-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    name: Open a draft release
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.make.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Create the draft release
+        id: make
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          tag="ot-ids-v${version}-build${{ github.run_number }}"
+          cat > notes.md <<EOF
+          Installer ISOs of the TechDetechtives OT IDS, version ${version}, built by GitHub Actions
+          from commit ${GITHUB_SHA} (${GITHUB_REF_NAME}), run ${{ github.run_number }}.
+
+          **This is a draft: only people with write access to the repository see it.** Publishing it
+          makes the ISOs public. Read NOTICE.md first: an ISO holds third-party content under its own
+          licences (Malcolm, the Elastic YARA rules under the Elastic License 2.0, JA4+ and others).
+
+          **The ISOs are untested.** They were built automatically; nobody has installed one. The
+          pictures named boot-*.png show how far each got when started in a virtual machine here.
+
+          ### Putting an ISO together
+          GitHub takes files of up to 2 GB, so each ISO is attached in parts. Download every part of
+          one ISO and its .sha256 file into one folder, then:
+
+          Linux or macOS:
+              cat techdetechtives-server-*.iso.part-* > techdetechtives-server.iso
+              sha256sum techdetechtives-server.iso     # compare with the .sha256 file
+
+          Windows (Command Prompt):
+              copy /b techdetechtives-server-*.iso.part-* techdetechtives-server.iso
+              certutil -hashfile techdetechtives-server.iso SHA256
+
+          The same for the sensor. Then write the ISO to a USB stick (Rufus in DD mode, balenaEtcher,
+          or dd) or attach it to a virtual machine. **The installer erases every disk of the machine
+          it is started on.**
+
+          ### Also attached, per ISO
+          rule-check.txt (what the product's own Suricata, YARA and Zeek made of the rules), the
+          ATT&CK for ICS and vulnerability coverage reports, external-sources.txt, and the build logs.
+          EOF
+          gh release create "$tag" --draft --target "$GITHUB_SHA" \
+            --title "TechDetechtives OT IDS ${version} installer ISOs (build ${{ github.run_number }})" \
+            --notes-file notes.md
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build the ${{ matrix.label }} ISO
+    needs: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - flavor: malcolm
+            label: server
+          - flavor: hedgehog
+            label: sensor
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.release.outputs.tag }}
+      LABEL: ${{ matrix.label }}
+      FLAVOR: ${{ matrix.flavor }}
+    steps:
+      - name: Free disk space and install the build tools
+        run: |
+          df -h / | tail -1
+          sudo docker rmi $(docker image ls -aq) >/dev/null 2>&1 || true
+          sudo rm -rf \
+            "$AGENT_TOOLSDIRECTORY" \
+            /opt/ghc \
+            /usr/lib/jvm \
+            /usr/local/.ghcup \
+            /usr/local/lib/android \
+            /usr/local/share/powershell \
+            /usr/share/dotnet \
+            /usr/share/swift >/dev/null 2>&1 || true
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get -q -y update >/dev/null 2>&1
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get -q -y --purge remove \
+            azure-cli 'dotnet*' firefox google-chrome-stable google-cloud-cli microsoft-edge-stable \
+            'mono-*' 'mysql*' 'postgresql*' powershell 'temurin*' >/dev/null 2>&1 || true
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get -q -y --purge autoremove >/dev/null 2>&1 || true
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y -q \
+            apt-transport-https bc build-essential ca-certificates curl debhelper-compat \
+            debian-archive-keyring debootstrap genisoimage gettext git gnupg2 imagemagick jq po4a \
+            python3 rsync software-properties-common squashfs-tools virt-what xmlstarlet xorriso \
+            xz-utils >/dev/null
+          git clone --quiet --depth=1 --single-branch --recurse-submodules --shallow-submodules \
+            --branch='debian/1%20230131' 'https://salsa.debian.org/live-team/live-build.git' /tmp/live-build
+          (cd /tmp/live-build && dpkg-buildpackage -b -uc -us >/dev/null 2>&1)
+          sudo dpkg -i /tmp/live-build*.deb >/dev/null
+          sudo rm -rf /tmp/live-build /tmp/live-build*.deb
+          lb --version
+          docker --version
+          df -h / | tail -1
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: The kit's own tests
+        id: tests
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/logs"
+          cd ot-ids
+          python3 -m unittest discover -s tests 2>&1 | tee "$RUNNER_TEMP/logs/0-tests.log" | tail -5
+          exit "${PIPESTATUS[0]}"
+
+      - name: Settings for this job
+        run: |
+          cd ot-ids
+          sed -i "s/^FLAVORS=.*/FLAVORS=\"$FLAVOR\"/; s/^BUILD_MODE=.*/BUILD_MODE=\"native\"/" build.conf
+          grep -E '^(FLAVORS|BUILD_MODE|INCLUDE_IMAGES|MALCOLM_REF)=' build.conf
+
+      - name: prepare
+        run: |
+          set -o pipefail
+          cd ot-ids
+          ./build-iso.sh prepare 2>&1 | tee "$RUNNER_TEMP/logs/1-prepare.log" | tail -25
+
+      - name: sources
+        run: |
+          set -o pipefail
+          cd ot-ids
+          ./build-iso.sh sources 2>&1 | tee "$RUNNER_TEMP/logs/2-sources.log" | tail -40
+
+      - name: images
+        run: |
+          set -o pipefail
+          cd ot-ids
+          ./build-iso.sh images 2>&1 | tee "$RUNNER_TEMP/logs/3-images.log" | { grep -v '^[0-9a-f]\{12\}: \|^Digest: \|^Status: ' || true; } | tail -150
+          ls -lh work/*_images.tar.xz
+          echo "----- rule-check.txt"
+          cat out/rule-check.txt || true
+
+      - name: Make room for the live-build
+        run: |
+          docker system prune -af --volumes >/dev/null 2>&1 || true
+          df -h / | tail -1
+
+      - name: iso
+        env:
+          REMOVE_IMAGE_BUNDLE: "true"      # the bundle is inside the ISO's file tree by then; the disk is small
+        run: |
+          set -o pipefail
+          cd ot-ids
+          ./build-iso.sh iso 2>&1 | tee "$RUNNER_TEMP/logs/4-iso.log" | tail -60
+          df -h / | tail -1
+
+      - name: Check the ISO
+        id: check
+        run: |
+          set -o pipefail
+          cd ot-ids/out
+          ls -lh
+          sha256sum -c ./*.iso.sha256
+          iso="$(ls techdetechtives-*.iso)"
+          echo "iso=$iso" >> "$GITHUB_OUTPUT"
+          {
+            echo "ISO: $iso"
+            echo "Size: $(du -h "$iso" | cut -f1) ($(stat -c %s "$iso") bytes)"
+            echo "SHA-256: $(cut -d' ' -f1 "$iso.sha256")"
+            echo
+            echo "Boot records (xorriso -report_el_torito plain):"
+            xorriso -indev "$iso" -report_el_torito plain 2>/dev/null
+          } | tee "$RUNNER_TEMP/logs/5-iso-check.txt"
+          # an ISO that boots on both kinds of firmware has a BIOS and a UEFI boot image; said, not enforced
+          for kind in BIOS UEFI; do
+            grep -q "$kind" "$RUNNER_TEMP/logs/5-iso-check.txt" && echo "boot image for $kind: present" || echo "WARNING: no $kind boot image reported"
+          done | tee -a "$RUNNER_TEMP/logs/5-iso-check.txt"
+
+      - name: Start the ISO in a virtual machine and take pictures
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y -q \
+            qemu-system-x86 ovmf socat >/dev/null
+          iso="$PWD/ot-ids/out/${{ steps.check.outputs.iso }}"
+          kvm=""; [[ -e /dev/kvm ]] && kvm="-enable-kvm -cpu host"
+          echo "KVM: ${kvm:-not available, emulating}"
+          shoot() {   # shoot <name> <seconds to wait> <extra qemu arguments...>
+            local name="$1" wait="$2"; shift 2
+            local sock="/tmp/mon-$name.sock"
+            sudo rm -f "$sock"
+            sudo qemu-system-x86_64 -m 3072 -smp 2 $kvm -cdrom "$iso" -boot d -display none -vga std \
+              -monitor "unix:$sock,server,nowait" "$@" &
+            sleep "$wait"
+            echo "screendump /tmp/$name.ppm" | sudo socat - "UNIX-CONNECT:$sock" >/dev/null || true
+            sleep 3
+            echo "quit" | sudo socat - "UNIX-CONNECT:$sock" >/dev/null || true
+            sleep 2
+            sudo pkill -f "mon-$name.sock" || true
+            sudo chmod a+r "/tmp/$name.ppm" && convert "/tmp/$name.ppm" "$RUNNER_TEMP/logs/boot-$LABEL-$name.png"
+          }
+          # no disk is attached, so nothing can be installed or erased here
+          shoot bios 40
+          shoot uefi 60 -bios /usr/share/ovmf/OVMF.fd
+          ls -l "$RUNNER_TEMP"/logs/boot-*.png
+
+      - name: Attach the ISO to the draft release
+        run: |
+          cd ot-ids/out
+          iso="${{ steps.check.outputs.iso }}"
+          split -b 1900M -d -a 2 "$iso" "$iso.part-"
+          ls -lh "$iso".part-*
+          gh release upload "$TAG" "$iso".part-* "$iso.sha256" --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Attach the reports and the logs
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/attach"
+          cd "$RUNNER_TEMP/attach"
+          for report in rule-check.txt external-sources.txt attack-ics-coverage.md vulnerability-coverage.md; do
+            [[ -f "$GITHUB_WORKSPACE/ot-ids/out/$report" ]] && cp "$GITHUB_WORKSPACE/ot-ids/out/$report" "$LABEL-$report"
+          done
+          cp "$GITHUB_WORKSPACE"/ot-ids/out/*-build.log "$RUNNER_TEMP/logs/" 2>/dev/null || true
+          cp "$RUNNER_TEMP"/logs/boot-*.png . 2>/dev/null || true
+          cp "$RUNNER_TEMP/logs/5-iso-check.txt" "$LABEL-iso-check.txt" 2>/dev/null || true
+          {
+            echo "job status: ${{ job.status }}; kit tests: ${{ steps.tests.outcome }}"
+            echo "commit $GITHUB_SHA, run $GITHUB_RUN_ID attempt $GITHUB_RUN_ATTEMPT, $(date -u +%FT%TZ)"
+            df -h / | tail -1
+            for log in "$RUNNER_TEMP"/logs/[0-9]-*.log; do
+              echo; echo "===== last lines of $(basename "$log")"; tail -40 "$log"
+            done
+          } > "$LABEL-summary.txt" 2>&1
+          tar -C "$RUNNER_TEMP" -czf "$LABEL-logs.tar.gz" logs
+          ls -lh
+          gh release upload "$TAG" ./* --clobber --repo "$GITHUB_REPOSITORY"
+          cat "$LABEL-summary.txt" >> "$GITHUB_STEP_SUMMARY" || true

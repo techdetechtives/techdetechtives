@@ -981,6 +981,24 @@ class HardeningFiles(unittest.TestCase):
         self.assertTrue((self.ROOTFS / "usr/local/lib/techdetechtives/td_pcap_order.py").is_file())
         self.assertIn('cp -a "$KIT_DIR/hardening/rootfs/." "$root/"', build)
 
+    def test_the_workflow_that_builds_the_isos_uses_the_build_as_it_is(self):
+        """The GitHub Actions workflow runs the build's stages by name and edits two settings by their names."""
+        workflow = (KIT.parent / ".github/workflows/ot-ids-iso.yml").read_text()
+        build = (KIT / "build-iso.sh").read_text()
+        stages = re.findall(r"\./build-iso\.sh (\w+)", workflow)
+        self.assertEqual(stages, ["prepare", "sources", "images", "iso"])
+        for stage in stages:
+            self.assertIn(f"  {stage})", build)
+        settings = (KIT / "build.conf").read_text()
+        for name in ("FLAVORS", "BUILD_MODE"):
+            self.assertIn(f"s/^{name}=", workflow)
+            self.assertRegex(settings, rf"(?m)^{name}=")
+        self.assertIn("REMOVE_IMAGE_BUNDLE", workflow)
+        self.assertIn('"${REMOVE_IMAGE_BUNDLE:-false}" == "true"', build)
+        self.assertIn("gh release create \"$tag\" --draft", workflow, "the ISOs are not made public by the build")
+        self.assertIn("ot-ids/.iso-build-request", workflow)
+        self.assertTrue((KIT / ".iso-build-request").is_file())
+
     def test_scripts_parse(self):
         scripts = [KIT / "build-iso.sh", *sorted((KIT / "tools").glob("*.sh")), *sorted((self.ROOTFS / "usr/local/bin").iterdir())]
         self.assertGreaterEqual(len(scripts), 5)
