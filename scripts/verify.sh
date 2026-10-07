@@ -177,6 +177,13 @@ PY
     else
       fail "network inventory tests (run: python3 -m unittest discover -s network/tests -v)"
     fi
+    if python3 -m unittest discover -s "$ROOT/ot-ids/tests" >/dev/null 2>&1; then
+      skipped=""
+      command -v yara >/dev/null 2>&1 || skipped="; YARA rules skipped, yara is not installed"
+      pass "OT IDS tests (rules against sample packets, Snort conversion, indicators, vulnerability index, ATT&CK for ICS mapping, baseline program, traffic profile, incident replay report, capture ordering tool, YARA sources, hardening files$skipped)"
+    else
+      fail "OT IDS tests (run: python3 -m unittest discover -s ot-ids/tests -v)"
+    fi
     if python3 -m unittest discover -s "$ROOT/vulnerability/tests" >/dev/null 2>&1; then
       pass "vulnerability connector tests"
     else

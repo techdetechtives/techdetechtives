@@ -1,0 +1,28 @@
+# What it would take to detect a technique that MITRE says shows up in network
+# traffic and that has no detection here. Printed beside the technique in the
+# coverage report's list of gaps. A note for a technique that is covered is ignored.
+technique,note
+T0800,"The command that puts a device into firmware update mode is different for each vendor; a rule needs a capture of each one."
+T0802,"Shows as steady reading from an address that does not normally read. The three OT anomaly detectors (shipped switched off) are the nearest thing; there is no rule."
+T0817,"Web browsing from the control network. The general rule set bundled with the product is where exploit-kit rules live; it is not counted on this page."
+T0819,"Exploits of known vulnerabilities are in the general rule set bundled with the product, listed by CVE in the build's vulnerability coverage report; they are not counted on this page."
+T0838,"Writes to alarm limits look like any other write unless the sensor is told which points hold alarm settings. Only DNP3's switch for unsolicited reporting is watched."
+T0848,"Needs the list of real masters. The baseline program learns it and reports a new master, once its alerts are switched on (td-baseline alerts on); it is not counted here while they are off. Or set MODBUS_CLIENT and DNP3_CLIENT on the sensor and the imported Quickdraw rules name commands from any other address."
+T0860,"Radio links are not on the wire the sensor listens to."
+T0864,"The baseline program reports an address never seen before on an industrial protocol, once its alerts are switched on (td-baseline alerts on); it is not counted here while they are off."
+T0865,"Email is not normally carried on a control network; this belongs to the mail gateway."
+T0868,"Operator stations read the controller's mode all day. A rule needs the list of stations allowed to ask."
+T0884,"Proxy and tunnelling tools have nothing specific to industrial networks to match on; the general rule set is where such rules belong."
+T0885,"The imported Quickdraw set has rules for another protocol on the Modbus and DNP3 ports. Nothing in this repository does it."
+T0886,"RDP, SSH and file sharing inside the network are normal engineering traffic; they become a signal only against a record of who normally uses them. The correlation rules use remote access from outside as their first step."
+T0887,"Radio links are not on the wire the sensor listens to."
+T0892,"Password-change commands are different for each vendor; a rule needs a capture of each one."
+T1691.001,"A blocked command shows as traffic that stops. That needs a baseline of what is expected, which rules do not have."
+T1692.002,"A false report cannot be told from a true one without knowing the real process value. Reports from an address that is not the device could be caught with a list of devices."
+T1693.002,"On most protocols a module's firmware arrives the same way as the device's own; the rules here cannot tell them apart."
+T1694,"Default and hardcoded passwords can be matched where logins are not encrypted (Telnet, FTP, plain HTTP), one product at a time. The imported ELITEWOLF set does it for SEL relays."
+T1694.001,"Default passwords can be matched where logins are not encrypted, one product at a time. The imported ELITEWOLF set does it for SEL relays."
+T1694.002,"Hardcoded passwords can be matched where logins are not encrypted, one product at a time. Nothing here does."
+T1695.001,"The serial link itself is not on the Ethernet the sensor listens to. MITRE's example is a TCP session held open to the serial-to-Ethernet converter so nothing else can use it; catching that needs the list of converters and the addresses allowed to connect to them."
+T1695.003,"Radio links are not on the wire the sensor listens to."
+T0830,"The layer 2 watch detects ARP poisoning. If this page lists the technique as a gap, the build left the watch out: out/rule-check.txt says why."

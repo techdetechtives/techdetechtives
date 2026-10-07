@@ -1,0 +1,4 @@
+# One indicator per line: an address, network, domain, URL, e-mail address or file hash.
+# Lines starting with # are ignored. Example (remove the leading # to use):
+# 203.0.113.45
+# bad-domain.example

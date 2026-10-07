@@ -1,8 +1,10 @@
 # Upstream projects TechDetechtives is built on. scripts/fetch-upstream.sh clones
 # them at these commits for reference. None is copied into this repository, with
-# one exception: a reviewed selection of documents from cybersecurity-skills is
-# copied, unchanged, into skills/community/ (see skills/README.md). opencanary is
-# installed, unchanged, into the honeypot's container image at its commit.
+# two exceptions: a reviewed selection of documents from cybersecurity-skills is
+# copied, unchanged, into skills/community/ (see skills/README.md), and a
+# reference list drawn from attack-stix-data is kept in ot-ids/attack/ics-attack.json
+# (rebuilt with ot-ids/tools/attack_ics.py update). opencanary is installed,
+# unchanged, into the honeypot's container image at its commit.
 # name | repository | branch | commit | version | licence
 securityonion|https://github.com/Security-Onion-Solutions/securityonion.git|3/main|3e5a934ff842987ccc76c5567590473eca61dedd|3.3.0|Elastic-2.0
 helk|https://github.com/Cyb3rWard0g/HELK.git|master|ad752b2a0d56110c0df49fa3e9e5e19f556039db|alpha (2021-05-08)|GPL-3.0
@@ -11,3 +13,5 @@ greenbone|https://github.com/greenbone/docs.git|main|e91e2c54b18a6d74f86369471cd
 cybersecurity-skills|https://github.com/mukul975/Anthropic-Cybersecurity-Skills.git|main|54a798831d2266a3ca61ce68a7acb80b81160d57|1.3.0 (2026-08-31)|Apache-2.0
 atomic-red-team|https://github.com/redcanaryco/atomic-red-team.git|master|388942adbd9641f4dfdcf079d7efe9a75ec0ac43|2026-09-05 (test definitions referenced by platform/detections/validation.yml)|MIT
 opencanary|https://github.com/thinkst/opencanary.git|master|fb12e4fefbdb1b9acd1e5561a2614f827ab639ff|0.9.10 (2026-09-21)|BSD-3-Clause
+malcolm|https://github.com/idaholab/Malcolm.git|v26.09.0|b09a0adaee18421bcc24f3c5608d2135a6ee84bb|26.09.0 (base of the OT IDS; cloned at build time by ot-ids/build-iso.sh)|Apache-2.0
+attack-stix-data|https://github.com/mitre-attack/attack-stix-data.git|master|6cda5ad8462c79e14fbb872f4e09059b18e0cfc4|ATT&CK for ICS 19.2 (source of ot-ids/attack/ics-attack.json)|MITRE ATT&CK terms of use
