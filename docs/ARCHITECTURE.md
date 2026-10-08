@@ -1,5 +1,9 @@
 # Architecture
 
+![TechDetechtives design: sources, the Security Onion platform and the second machine, with the data flows between them](images/TechDetechtives-Design.png)
+
+The same picture as an SVG: [images/TechDetechtives-Design.svg](images/TechDetechtives-Design.svg).
+
 ## Layout
 
 ```

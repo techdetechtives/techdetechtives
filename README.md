@@ -21,6 +21,8 @@ TechDetechtives is a **modified deployment built on Security Onion**, combined w
 
 Security Onion's code and image are **not** in this repository, and neither are DFIR-IRIS, Greenbone or OpenCanary; the only upstream material copied here is the selection of skill documents in `skills/community/`. You install Security Onion from its official ISO or installer, and this repository customizes that installation through the customization points Security Onion provides. That keeps upgrades working and keeps the two licences separate. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains the design.
 
+![TechDetechtives design](docs/images/TechDetechtives-Design.png)
+
 ## Requirements
 
 - **Platform host(s):** a working Security Onion 3.x installation (see its hardware requirements). The overlay runs on the manager node.
