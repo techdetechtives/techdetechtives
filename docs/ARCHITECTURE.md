@@ -42,6 +42,8 @@ The same picture as an SVG: [images/TechDetechtives-Design.svg](images/TechDetec
         |    reads Zeek's records with the read-only key         |
         |    --> devices, traffic map, changes pages (8445)      |
         |    --> changes to the platform as alerts (append-only) |
+        |    advisories: JPCERT/CC, JVN, CISA (HTTPS download)   |
+        |    --> matched to devices, findings, listed products   |
         +--------------------------------------------------------+
 ```
 
@@ -79,7 +81,9 @@ The connector shares no network port with Greenbone: it mounts Greenbone's socke
 3. For the first 72 hours after records start arriving, everything is taken as the baseline. After that, a device, an industrial conversation or a control command that was not there before is written down as a change.
 4. Changes are shown on the pages and, with an append-only key, sent to the platform as alerts (`event.module: netmap`, tagged `alert`). The existing forwarder turns medium and high ones into tickets.
 
-It runs beside DFIR-IRIS and never sends anything to the monitored network. See `network/README.md`.
+5. Every six hours it downloads published advisories (JPCERT/CC, JVN, JVN iPedia, CISA's ICS advisories as CSAF documents, CISA's catalogue of exploited vulnerabilities), or reads advisory files put in a folder on machines without internet access. On every pass it matches them against the CVEs that Greenbone scans found (read from the platform), the vendor and model devices announce, and the site's own list of products. A new match is a change like the others, so it becomes an alert and a ticket.
+
+It runs beside DFIR-IRIS and never sends anything to the monitored network; the advisory downloads are its only traffic to the internet, and carry nothing about the site. See `network/README.md`.
 
 ## Honeypot flow
 

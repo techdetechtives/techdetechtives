@@ -1,0 +1,161 @@
+{
+ "feed": {
+  "id": "cisa-csaf-ot-feed-tlp-white",
+  "title": "CISA CSAF OT feed (TLP:WHITE)",
+  "link": [
+   {
+    "rel": "self",
+    "href": "https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/cisa-csaf-ot-feed-tlp-white.json"
+   }
+  ],
+  "category": [
+   {
+    "scheme": "urn:ietf:params:rolie:category:information-type",
+    "term": "csaf"
+   }
+  ],
+  "updated": "2026-10-07T23:06:40.800927Z",
+  "entry": [
+   {
+    "id": "ICSA-25-205-03",
+    "title": "Honeywell Experion PKS (Update A)",
+    "link": [
+     {
+      "href": "https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/2025/icsa-25-205-03.json",
+      "rel": "self"
+     },
+     {
+      "href": "https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/2025/icsa-25-205-03.json.asc",
+      "rel": "signature"
+     },
+     {
+      "href": "https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/2025/icsa-25-205-03.json.sha512",
+      "rel": "hash"
+     }
+    ],
+    "published": "2025-07-24T06:00:00.000000Z",
+    "updated": "2025-08-04T06:00:00.000000Z",
+    "content": {
+     "src": "https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/2025/icsa-25-205-03.json",
+     "type": "application/json"
+    },
+    "format": {
+     "schema": "https://docs.oasis-open.org/csaf/csaf/v2.0/csaf_json_schema.json",
+     "version": "2.0"
+    }
+   },
+   {
+    "id": "ICSA-23-194-06",
+    "title": "Honeywell Experion PKS, LX and PlantCruise",
+    "link": [
+     {
+      "href": "https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/2023/icsa-23-194-06.json",
+      "rel": "self"
+     },
+     {
+      "href": "https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/2023/icsa-23-194-06.json.asc",
+      "rel": "signature"
+     },
+     {
+      "href": "https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/2023/icsa-23-194-06.json.sha512",
+      "rel": "hash"
+     }
+    ],
+    "published": "2023-07-13T00:00:00.000000Z",
+    "updated": "2023-07-13T00:00:00.000000Z",
+    "content": {
+     "src": "https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/2023/icsa-23-194-06.json",
+     "type": "application/json"
+    },
+    "format": {
+     "schema": "https://docs.oasis-open.org/csaf/csaf/v2.0/csaf_json_schema.json",
+     "version": "2.0"
+    }
+   },
+   {
+    "id": "ICSA-21-278-04",
+    "title": "Honeywell Experion PKS and ACE Controllers",
+    "link": [
+     {
+      "href": "https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/2021/icsa-21-278-04.json",
+      "rel": "self"
+     },
+     {
+      "href": "https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/2021/icsa-21-278-04.json.asc",
+      "rel": "signature"
+     },
+     {
+      "href": "https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/2021/icsa-21-278-04.json.sha512",
+      "rel": "hash"
+     }
+    ],
+    "published": "2021-10-05T00:00:00.000000Z",
+    "updated": "2021-10-05T00:00:00.000000Z",
+    "content": {
+     "src": "https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/2021/icsa-21-278-04.json",
+     "type": "application/json"
+    },
+    "format": {
+     "schema": "https://docs.oasis-open.org/csaf/csaf/v2.0/csaf_json_schema.json",
+     "version": "2.0"
+    }
+   },
+   {
+    "id": "ICSA-26-280-01",
+    "title": "CISA Malcolm",
+    "link": [
+     {
+      "href": "https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/2026/icsa-26-280-01.json",
+      "rel": "self"
+     },
+     {
+      "href": "https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/2026/icsa-26-280-01.json.asc",
+      "rel": "signature"
+     },
+     {
+      "href": "https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/2026/icsa-26-280-01.json.sha512",
+      "rel": "hash"
+     }
+    ],
+    "published": "2026-10-07T06:00:00.000000Z",
+    "updated": "2026-10-07T06:00:00.000000Z",
+    "content": {
+     "src": "https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/2026/icsa-26-280-01.json",
+     "type": "application/json"
+    },
+    "format": {
+     "schema": "https://docs.oasis-open.org/csaf/csaf/v2.0/csaf_json_schema.json",
+     "version": "2.0"
+    }
+   },
+   {
+    "id": "ICSA-26-279-02",
+    "title": "Savannah lwIP SMTP client",
+    "link": [
+     {
+      "href": "https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/2026/icsa-26-279-02.json",
+      "rel": "self"
+     },
+     {
+      "href": "https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/2026/icsa-26-279-02.json.asc",
+      "rel": "signature"
+     },
+     {
+      "href": "https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/2026/icsa-26-279-02.json.sha512",
+      "rel": "hash"
+     }
+    ],
+    "published": "2026-10-06T06:00:00.000000Z",
+    "updated": "2026-10-06T06:00:00.000000Z",
+    "content": {
+     "src": "https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/2026/icsa-26-279-02.json",
+     "type": "application/json"
+    },
+    "format": {
+     "schema": "https://docs.oasis-open.org/csaf/csaf/v2.0/csaf_json_schema.json",
+     "version": "2.0"
+    }
+   }
+  ]
+ }
+}

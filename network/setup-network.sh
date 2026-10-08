@@ -9,6 +9,7 @@
 # Usage:
 #   network/setup-network.sh [--name HOSTNAME] [--ip ADDRESS] [--port 8445]
 #                            [--inside NETWORKS] [--zones NAME=NETWORK,...] [--learn-hours 72]
+#                            [--advisories on|off] [--watch "PRODUCT; PRODUCT"] [--advisory-proxy URL]
 #
 #   --name         name analysts will use for this host (default: this host's name)
 #   --ip           internal IP address of this host, added to the certificate
@@ -17,6 +18,11 @@
 #   --zones        names for parts of your network, for example
 #                  "Control=10.10.1.0/24,Office=172.16.0.0/16" (default: each /24 is a zone)
 #   --learn-hours  how long everything seen is taken as normal (default 72)
+#   --advisories   on: fetch published advisories (JPCERT/CC, JVN, CISA) from the
+#                  internet (default); off: read only files put in network/advisories/
+#   --watch        products this site runs that do not announce themselves on the
+#                  network, separated by ';', for example "Honeywell Experion PKS; Honeywell C300"
+#   --advisory-proxy  web proxy for fetching advisories, for example http://proxy.example:3128
 
 set -euo pipefail
 
@@ -30,6 +36,10 @@ PORT=""
 INSIDE=""
 ZONES=""
 LEARN=""
+ADVISORIES=""
+WATCH=""
+WATCH_SET=0
+ADV_PROXY=""
 
 log()  { printf '[techdetechtives] %s\n' "$*"; }
 die()  { printf '[techdetechtives] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -42,7 +52,10 @@ while [[ $# -gt 0 ]]; do
     --inside)      shift; [[ $# -gt 0 ]] || die "--inside needs a value"; INSIDE="$1" ;;
     --zones)       shift; [[ $# -gt 0 ]] || die "--zones needs a value"; ZONES="$1" ;;
     --learn-hours) shift; [[ $# -gt 0 ]] || die "--learn-hours needs a value"; LEARN="$1" ;;
-    -h|--help)     sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --advisories)  shift; [[ $# -gt 0 ]] || die "--advisories needs on or off"; ADVISORIES="$1" ;;
+    --watch)       shift; [[ $# -gt 0 ]] || die "--watch needs a value"; WATCH="$1"; WATCH_SET=1 ;;
+    --advisory-proxy) shift; [[ $# -gt 0 ]] || die "--advisory-proxy needs a value"; ADV_PROXY="$1" ;;
+    -h|--help)     sed -n '2,26p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
   shift
@@ -94,6 +107,17 @@ if [[ -n "$SERVER_IP" ]]; then
 fi
 if [[ -n "$LEARN" ]]; then
   [[ "$LEARN" =~ ^[0-9]+$ ]] || die "--learn-hours must be a whole number of hours"
+fi
+case "$ADVISORIES" in
+  ""|on|off) ;;
+  *) die "--advisories must be on or off" ;;
+esac
+# The list is kept on one line in the settings file; '=' and quotes have no place in a product name.
+if [[ $WATCH_SET -eq 1 && ! "$WATCH" =~ ^[A-Za-z0-9\ \;\.,/_+\(\)-]*$ ]]; then
+  die "--watch may contain letters, digits, spaces and . , / _ + ( ) - ; only"
+fi
+if [[ -n "$ADV_PROXY" && ! "$ADV_PROXY" =~ ^https?://[A-Za-z0-9._~:@%-]+/?$ ]]; then
+  die "--advisory-proxy must be a proxy address such as http://proxy.example:3128"
 fi
 # Networks and zones are checked by the same code that will use them.
 if [[ -n "$INSIDE$ZONES" ]]; then
@@ -153,4 +177,11 @@ set_env TD_NET_PUBLIC_URL "https://$SERVER_NAME:$PORT"
 [[ -z "$INSIDE" ]] || set_env TD_NET_INSIDE "$INSIDE"
 [[ -z "$ZONES" ]] || set_env TD_NET_ZONES "$ZONES"
 [[ -z "$LEARN" ]] || set_env TD_NET_LEARN_HOURS "$LEARN"
+case "$ADVISORIES" in
+  on)  set_env TD_ADV_FEEDS "" ;;           # empty = the standard feeds
+  off) set_env TD_ADV_FEEDS "off" ;;
+esac
+[[ $WATCH_SET -eq 0 ]] || set_env TD_ADV_WATCH "$WATCH"
+[[ -z "$ADV_PROXY" ]] || set_env TD_ADV_PROXY "$ADV_PROXY"
+mkdir -p "$ROOT/network/advisories"
 log "network inventory prepared: https://$SERVER_NAME:$PORT"

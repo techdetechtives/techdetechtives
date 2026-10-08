@@ -4,8 +4,10 @@
 # Reads connection and industrial-protocol records from the platform with the
 # read-only key, keeps a device inventory and a baseline of who talks to whom,
 # serves the pages, and (when its own key is set) sends what is new since the
-# baseline to the platform as alerts. It never sends anything to the monitored
-# network.
+# baseline to the platform as alerts. It also downloads published security
+# advisories (JPCERT/CC, JVN, CISA) and matches them against the devices; set
+# TD_ADV_FEEDS=off for a machine without internet access. It never sends
+# anything to the monitored network.
 #
 # Start with:  scripts/install.sh network
 
@@ -16,7 +18,7 @@ services:
     build:
       context: ..
       dockerfile: network/app/Dockerfile
-    image: techdetechtives/netmap:0.1.0
+    image: techdetechtives/netmap:0.2.0
     container_name: td-netmap
     env_file:
       - ../config/techdetechtives.env
@@ -39,6 +41,7 @@ services:
     volumes:
       - td-netmap-state:/state
       - ./certs:/tls:ro
+      - ./advisories:/advisories:ro
       - ../branding:/brand:ro
       - ../analytics/certs:/certs:ro
     restart: unless-stopped

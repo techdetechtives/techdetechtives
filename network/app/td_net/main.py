@@ -6,6 +6,7 @@
     python -m td_net.main --once     one pass, then exit
     python -m td_net.main --check    test every connection and exit
     python -m td_net.main --accept   take everything seen so far as the baseline
+    python -m td_net.main --advisories   fetch published advisories now and match them, then exit
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from pathlib import Path
 
 import td_forwarder as fw
 
-from . import VERSION
+from . import VERSION, advisories
 from .outputs import PlatformWriter
 from .platform import Platform
 from .protocols import OT_DATASETS
@@ -61,6 +62,19 @@ class Config:
         self.max_changes = fw._int("TD_NET_MAX_CHANGES_PER_PASS", 100, 1)
         self.db_path = get("TD_NET_DB", "/state/network.db")
         self.scope = Scope(get("TD_NET_INSIDE", INSIDE_DEFAULT), get("TD_NET_ZONES"))
+
+        # Published advisories (see advisories.py).
+        self.adv_enabled = _flag("TD_ADV_ENABLED", True)
+        self.adv_feeds = advisories.parse_feeds(get("TD_ADV_FEEDS", advisories.DEFAULT_FEEDS))
+        self.adv_import_dir = get("TD_ADV_IMPORT_DIR", "/advisories")
+        self.adv_watch = advisories.parse_watch(env.get("TD_ADV_WATCH", ""))
+        self.adv_proxy = get("TD_ADV_PROXY")
+        if self.adv_proxy and not re.fullmatch(r"https?://[A-Za-z0-9._~:@%-]+/?", self.adv_proxy):
+            raise fw.ConfigError("TD_ADV_PROXY must be a proxy address such as http://proxy.example:3128")
+        self.adv_fetch_hours = fw._int("TD_ADV_FETCH_HOURS", 6, 1)
+        self.adv_recent_days = fw._int("TD_ADV_RECENT_DAYS", 365, 1)
+        self.adv_max_documents = fw._int("TD_ADV_MAX_DOCUMENTS", 150, 1)
+        self.adv_finding_days = fw._int("TD_ADV_FINDING_DAYS", 30, 1)
 
         self.web_bind = get("TD_NET_BIND", "0.0.0.0")
         self.web_port = fw._int("TD_NET_PORT", 8445, 1)
@@ -110,6 +124,15 @@ def run_cycle(config: Config, platform: Platform, store: Store, writer, now=None
         status["error"] = str(error)[:400]
         store.set_meta("status", status)
         store.commit()
+    try:
+        result = advisories.run(store, platform, config, now)
+        summary["changes"] += result["changes"]
+        summary["advisories"] = result
+        summary["warnings"] += result["errors"]
+    except Exception as error:      # advisories must never stop the inventory
+        store.db.rollback()
+        log.exception("published advisories could not be processed")
+        summary["errors"].append(f"published advisories: {error}")
     if writer is not None:
         try:
             summary["sent"] = writer.send(store)
@@ -179,6 +202,60 @@ def status(config: Config) -> int:
     return 0
 
 
+def advisory_status(config: Config) -> int:
+    """One line per advisory source, for scripts/verify.sh network. 1 when a source failed."""
+    if not config.adv_enabled:
+        print("[skip] published advisories: turned off (TD_ADV_ENABLED=0)")
+        return 0
+    store = Store(config.db_path)
+    try:
+        advisories.prepare(store)
+        feeds, counts = store.meta("advisory_feeds", {}) or {}, advisories.overview(store)
+    finally:
+        store.close()
+    failed = 0
+    if not config.adv_feeds:
+        print("[note] published advisories: no feeds from the internet (TD_ADV_FEEDS=off); files in the import folder are read")
+    for feed in config.adv_feeds:
+        entry = feeds.get(feed.name) or {}
+        if not entry.get("checked"):
+            print(f"[note] advisories from {feed.name}: not fetched yet")
+        elif entry.get("error"):
+            failed += 1
+            print(f"[FAIL] advisories from {feed.name}: {entry['error']}")
+        else:
+            print(f"[ ok ] advisories from {feed.name}: last checked {entry['checked']}"
+                  + (f", {entry['waiting']:,} documents still to fetch" if entry.get("waiting") else ""))
+    for name, mark in sorted(((feeds.get("(files)") or {}).get("files") or {}).items()):
+        if str(mark).startswith("error:"):
+            failed += 1
+            print(f"[FAIL] advisory file {name}: {str(mark).split(':', 3)[-1]}")
+    print(f"[ ok ] {counts['advisories']:,} advisories known; {counts['matching']:,} concern {counts['targets']:,} devices or listed products")
+    return 1 if failed else 0
+
+
+def fetch_advisories(config: Config) -> int:
+    if not config.adv_enabled:
+        print("Published advisories are turned off (TD_ADV_ENABLED=0).")
+        return 0
+    store = Store(config.db_path, timeout=600)
+    try:
+        try:
+            platform = config.platform()
+        except fw.ConfigError:
+            platform = None
+        result = advisories.run(store, platform, config, force=True)
+        counts = advisories.overview(store)
+    finally:
+        store.close()
+    for problem in result["errors"]:
+        print(f"[FAIL] {problem}")
+    print(f"[{'ok' if not result['errors'] else 'note'}] {counts['advisories']:,} advisories known ({result['new']:,} new or changed, "
+          f"{result['documents']:,} documents fetched, {result['waiting']:,} still to fetch); "
+          f"{counts['matching']:,} concern this site; {result['changes']:,} new changes")
+    return 1 if result["errors"] and not counts["advisories"] else 0
+
+
 def serve(config: Config) -> threading.Thread:
     server = make_server(config, lambda: Store(config.db_path), config.scope)
     if config.tls_cert and config.tls_key:
@@ -205,15 +282,21 @@ def main(argv=None) -> int:
     parser.add_argument("--check", action="store_true", help="test every connection and exit")
     parser.add_argument("--accept", action="store_true", help="take everything seen so far as the baseline and exit")
     parser.add_argument("--status", action="store_true", help="say when the platform was last read, and exit")
+    parser.add_argument("--advisories", action="store_true", help="fetch published advisories now, match them, and exit")
+    parser.add_argument("--advisory-status", action="store_true", help="say when each advisory source was last read, and exit")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stdout)
 
     try:
-        config = Config(serving=not (args.once or args.check or args.accept or args.status))
+        config = Config(serving=not (args.once or args.check or args.accept or args.status or args.advisories or args.advisory_status))
+        if args.advisories:
+            return fetch_advisories(config)
         if args.check:
             return check(config)
         if args.status:
             return status(config)
+        if args.advisory_status:
+            return advisory_status(config)
         if args.accept:
             # A pass that is writing at this moment is waited for.
             store = Store(config.db_path, timeout=600)
@@ -234,8 +317,9 @@ def main(argv=None) -> int:
         log.error("%s", error)
         return 2
 
-    log.info("TechDetechtives network inventory %s: reading every %ds, alerts to the platform %s", VERSION,
-             config.sync_seconds, "on" if writer else "off")
+    log.info("TechDetechtives network inventory %s: reading every %ds, alerts to the platform %s, published advisories %s",
+             VERSION, config.sync_seconds, "on" if writer else "off",
+             f"from {len(config.adv_feeds)} feeds every {config.adv_fetch_hours}h" if config.adv_enabled else "off")
     while True:
         try:
             summary = run_cycle(config, platform, store, writer)

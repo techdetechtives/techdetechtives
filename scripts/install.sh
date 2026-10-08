@@ -27,8 +27,12 @@
 #   scripts/install.sh honeypot-down
 #        Stop the honeypot.
 #   scripts/install.sh network [--name HOSTNAME] [--ip ADDRESS] [--port 8445] [--inside NETWORKS] [--zones NAME=NETWORK,...] [--learn-hours 72]
+#                              [--advisories on|off] [--watch "PRODUCT; PRODUCT"] [--advisory-proxy URL]
 #        Run on the ticketing machine. Starts the device inventory and traffic
-#        map, built from what the platform's sensor recorded.
+#        map, built from what the platform's sensor recorded, and matches
+#        published advisories (JPCERT/CC, JVN, CISA) against it.
+#   scripts/install.sh network --fetch-advisories
+#        Fetch published advisories now instead of at the next interval.
 #   scripts/install.sh network --accept
 #        Take everything seen so far as normal (the new baseline).
 #   scripts/install.sh network-down
@@ -285,6 +289,12 @@ cmd_network() {
     docker ps --format '{{.Names}}' | grep -qx td-netmap \
       || die "the network inventory is not running (start it with: scripts/install.sh network)"
     docker exec td-netmap python -m td_net.main --accept || die "the baseline was not changed (see the line above)"
+    return 0
+  fi
+  if [[ "${1:-}" == "--fetch-advisories" ]]; then
+    docker ps --format '{{.Names}}' | grep -qx td-netmap \
+      || die "the network inventory is not running (start it with: scripts/install.sh network)"
+    docker exec td-netmap python -m td_net.main --advisories || die "advisories could not be fetched (see the lines above)"
     return 0
   fi
   "$ROOT/network/setup-network.sh" "$@"

@@ -209,6 +209,12 @@ class Platform:
         return self._groups("vulnerability findings", filters, [("ip", terms("host.ip"))],
                             {"worst": {"max": {"field": "event.severity"}}})
 
+    def finding_cves(self, since: datetime, until: datetime) -> Iterator[dict]:
+        """Which CVEs vulnerability scans found on which address: {ip, cve}. Used to match published advisories."""
+        filters = [{"term": {"event.dataset": "greenbone.result"}}, {"exists": {"field": "vulnerability.id"}},
+                   {"range": {"@timestamp": {"gt": fw.iso(since), "lte": fw.iso(until)}}}]
+        return self._groups("vulnerability findings by CVE", filters, [("ip", terms("host.ip")), ("cve", terms("vulnerability.id"))])
+
     def honeypot_contacts(self, since: datetime, until: datetime) -> Iterator[dict]:
         filters = [{"term": {"event.module": "opencanary"}}, {"range": {"@timestamp": {"gt": fw.iso(since), "lte": fw.iso(until)}}}]
         return self._groups("honeypot contacts", filters, [("ip", terms("source.ip"))])
