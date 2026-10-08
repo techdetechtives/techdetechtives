@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "network" / "app"))
 sys.path.insert(0, str(ROOT / "ticketing" / "forwarder"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+os.environ["TD_ADV_FEEDS"] = "off"          # no advisory feeds are fetched from the internet in tests
 
 import td_forwarder as fw  # noqa: E402
 from fake_platform import FakePlatform  # noqa: E402

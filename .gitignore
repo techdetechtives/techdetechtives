@@ -15,3 +15,5 @@ honeypot/opencanary.conf
 honeypot/ports.yaml
 network/certs/*
 !network/certs/.gitkeep
+network/advisories/*
+!network/advisories/README.md

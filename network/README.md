@@ -6,7 +6,7 @@ It **only reads from the platform**. It sends nothing to the monitored network: 
 
 | Part | What it is |
 | --- | --- |
-| `td-netmap` | One small container: reads grouped totals from the platform every five minutes, keeps the inventory in a local file, serves the pages over HTTPS. Python standard library only. MIT. |
+| `td-netmap` | One small container: reads grouped totals from the platform every five minutes, keeps the inventory in a local file, serves the pages over HTTPS, and downloads published security advisories to match against it. Python standard library only. MIT. |
 
 ## What you get
 
@@ -29,6 +29,69 @@ It **only reads from the platform**. It sends nothing to the monitored network: 
 | A new device | Low |
 
 Medium and high become tickets through the forwarder you already run. Each pair of devices is reported once, however many ports are involved, and a pass that finds more than 100 changes (a scan, a newly mirrored segment) keeps the most severe and says how many it left out.
+
+## Published advisories (JPCERT/CC, JVN, CISA)
+
+The Advisories page brings in what national CERTs publish and says which of it concerns this site. It downloads, every six hours:
+
+| Source | What it is | Format |
+| --- | --- | --- |
+| JPCERT/CC | Alerts and reports from Japan's CERT ([feed](https://www.jpcert.or.jp/english/rss/jpcert-en.rdf)) | RSS 1.0 |
+| JVN | Vulnerability notes coordinated by JPCERT/CC and IPA, many of them for industrial products ([feed](https://jvn.jp/en/rss/jvn.rdf)) | RSS 1.0 |
+| JVN iPedia | The same vulnerabilities with CVE numbers, vendors, products and CVSS scores ([feed](https://jvndb.jvn.jp/en/rss/jvndb.rdf)) | RSS 1.0 with JVN's security extension |
+| CISA ICS | Every ICS advisory CISA has published, as machine-readable CSAF documents ([feed](https://raw.githubusercontent.com/cisagov/CSAF/develop/csaf_files/OT/white/cisa-csaf-ot-feed-tlp-white.json)) | ROLIE listing of CSAF 2.0 |
+| CISA KEV | CISA's catalogue of vulnerabilities known to be used in real attacks ([feed](https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json)) | JSON |
+
+An advisory concerns this site in one of three ways:
+
+| How | Example | Raised as |
+| --- | --- | --- |
+| A vulnerability scan sent to the platform found one of its CVEs on a device | Greenbone found CVE-2021-44228 on 10.10.1.20; CISA lists it as exploited | High when the CVE is known to be exploited or scores 9.0 or more; otherwise medium |
+| A device announces a vendor and model the advisory names, in a version it says is affected | A Honeywell C300 announces itself over EtherNet/IP; ICSA-21-278-04 names "C300 and ACE controllers", all versions | The same |
+| The advisory names a product on the site's own list of what it runs | "Honeywell Experion PKS" is on the list; ICSA-25-205-03 is about Experion PKS | The same |
+
+Each one becomes a change, one per device or listed product however many advisories it gathers, so it reaches the platform as an alert and DFIR-IRIS as a ticket like any other change. A device whose announced version is outside the affected range is shown, marked "not affected", and raises nothing. Software banners (an SSH or web server announcing its name and version) are matched too, but only shown as possible: without a vendor they are too loose to raise alerts on.
+
+Most industrial equipment does not announce its model on the network (see "What it cannot do"), so tell it what you run:
+
+```bash
+scripts/install.sh network --watch "Honeywell Experion PKS; Honeywell C300; Honeywell ControlEdge"
+```
+
+A product on the list matches an advisory when every word of it appears in the advisory's title, summary or product names. The list says nothing about versions, so these matches read "check version".
+
+CISA has published about 4,000 ICS advisories. All are listed by title at once; the full document (CVE numbers, products, affected versions) is fetched for those updated in the last year, and for older ones about a vendor this site has (from what devices announce, their network cards' makers and the list), up to 150 a pass, so the first day fills in gradually.
+
+### Without internet access
+
+```bash
+scripts/install.sh network --advisories off
+```
+
+stops all downloads. Files put in `network/advisories/` are read instead, recognised by their contents: RSS or Atom feeds saved from a connected machine, CSAF advisories (CISA's, or a vendor's such as Siemens ProductCERT or Schneider Electric), or the KEV catalogue. Each file is read once, and again when it changes.
+
+When the machine reaches the internet through a proxy, give it for the advisories only (the platform connection never goes through it):
+
+```bash
+scripts/install.sh network --advisory-proxy http://proxy.example:3128
+```
+
+`scripts/install.sh network --fetch-advisories` fetches now instead of at the next interval. `scripts/verify.sh network` says whether every source could be read.
+
+### Adding a publisher
+
+Any feed in one of the four formats can be added to `TD_ADV_FEEDS` in `config/techdetechtives.env`, as `NAME=FORMAT:https://ADDRESS`, comma separated (`rss`, `kev`, `csaf-feed`, `csaf`). An empty value means the five sources above; listing your own replaces them, so keep the ones you want.
+
+### What the advisories part sends and keeps
+
+Plain downloads from the addresses above, with certificate checks, and nothing else: no device, address or finding leaves the machine. A listing can only send it to documents on the listing's own host. Feeds that declare a DTD or XML entities are refused. Advisories are kept in the inventory's local file.
+
+### Its limits
+
+- **A match by model is as good as what the device says.** Vendors name products in advisories differently from the way devices describe themselves ("ControlLogix 5580" against "1756-L83E/B LOGIX5583E"), so a device can be missed. The list of products covers what the network cannot tell.
+- **Versions are compared when both are written alike.** "R520.1" against "below R520.2" is decided; "R530.4" against "below R530 TCU3" is not, and reads "check version".
+- **JPCERT/CC's own feed carries few advisories** (mostly reports and alerts); JVN and JVN iPedia carry the vulnerability notes. JVN iPedia's feed holds only recent entries, so the Japanese side covers what was published since this part started, plus whatever you import.
+- **The feeds were read from their real formats for the tests, not fetched live**: CISA's advisories and catalogue were checked against copies taken from CISA's repositories; JVN's format against its published structure. The first live fetch is the test; `scripts/verify.sh network` shows its result.
 
 ## About "traffic shaping"
 
@@ -95,7 +158,7 @@ The page shows a notice while there are no records, and the learning time does n
 - **The maker of a network card** is only known for devices on the same network segment as the sensor; behind a router, the sensor sees the router's card. Card addresses themselves are only known from DHCP.
 - **A device is something that answered or spoke.** A connection attempt that got no answer, to an address nothing has been seen at, is ignored, so a scan of empty addresses does not fill the list with devices that do not exist. A device that only ever listens and never sends is therefore missing.
 - **An address is treated as a device.** Where DHCP hands addresses around, the same machine can appear as several devices over time, and each new address is a low-severity "new device".
-- **It does not find vulnerabilities.** Matching the models and versions it sees against published advisories is not built. Use the vulnerability part for that, with care around controllers.
+- **It does not find vulnerabilities itself.** It matches what it sees against published advisories (above) and against what the vulnerability part's scans found. Scanning is the vulnerability part's job, with care around controllers.
 - **It does not measure rates.** A flood is the job of the flood rules in `platform/detections/`; "this device normally receives 40 packets a second" is not learned here.
 - **Addresses ending in .255** are taken to be broadcast addresses. In a network larger than /24 a real device can have such an address and will be missing.
 - **Volumes start when this part starts** (it reads back 24 hours on its first pass) and are kept across restarts.
@@ -114,7 +177,7 @@ Settings are in `config/techdetechtives.env` under "Network inventory"; after ch
 
 ## Not yet run on a live system
 
-This part was built and tested against a stand-in for the platform (56 automated tests, and the pages checked by eye with a simulated plant). On a real platform, these are the first suspects if something is wrong:
+This part was built and tested against a stand-in for the platform (76 automated tests, 20 of them for the advisories, and the pages checked by eye with a simulated plant). On a real platform, these are the first suspects if something is wrong:
 
 - **Field names.** They were taken from Security Onion 2.4.211's ingest settings and the protocol analyzers' source, not from live records. A field that the platform cannot group on becomes a warning on the pages, and the rest keeps working.
 - **Late records.** Records are picked up by the time the sensor's agent read them, so a session that lasted a day is counted when it is finally written. They are read five minutes after that time (`TD_NET_LAG_SECONDS`), to give them time to reach the platform. A record that takes longer is not in the inventory; the next pass notices, and the pages then say how many and suggest a longer wait. How long the journey takes on your platform is not known yet.

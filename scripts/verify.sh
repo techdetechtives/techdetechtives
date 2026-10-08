@@ -282,6 +282,11 @@ cmd_network() {
   else
     fail "no finished read of the platform yet (docker logs td-netmap); the first one takes a minute or two"
   fi
+  if docker exec td-netmap python -m td_net.main --advisory-status; then
+    pass "published advisories: every source could be read"
+  else
+    fail "published advisories: a source could not be read (see the lines above; this machine needs to reach it, or set TD_ADV_PROXY)"
+  fi
 }
 
 cmd_honeypot() {

@@ -11,6 +11,7 @@ import csv
 import hmac
 import io
 import ipaddress
+import json
 import math
 import re
 import ssl
@@ -21,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable
 
-from . import VERSION
+from . import VERSION, advisories
 from .protocols import industrial_vendor
 from .store import Store, parse, stamp
 from .sync import OUTSIDE, PSEUDO, Scope
@@ -104,6 +105,8 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 18px;margin:0}dt{color:var(--ink2)}dd{margin:0;overflow-wrap:anywhere}
 table.devices td:nth-child(4),table.devices td:nth-child(5){min-width:150px}
 code{font:13px ui-monospace,monospace}
+form.filters input[type=search]{flex:1 1 260px;max-width:420px;font:inherit;font-size:14px;padding:5px 12px;border:1px solid var(--axis);border-radius:999px;background:var(--surface);color:var(--ink)}
+form.filters button{font:inherit;font-size:13px;padding:4px 14px;border:1px solid var(--ink);border-radius:999px;background:var(--surface);color:var(--ink);cursor:pointer}
 footer{max-width:1180px;margin:0 auto;padding:0 16px 32px;color:var(--muted);font-size:13px}
 """
 
@@ -406,7 +409,7 @@ def traffic_map(links: list[dict], assets: dict[str, dict], scope: Scope, max_no
 # ---- pages -----------------------------------------------------------------------
 def page(title: str, active: str, body: str, config) -> bytes:
     links = [("/", "Overview"), ("/devices", "Devices"), ("/map", "Traffic map"), ("/operations", "Industrial operations"),
-             ("/changes", "Changes")]
+             ("/advisories", "Advisories"), ("/changes", "Changes")]
     nav = "".join(f'<a href="{href}" class="{"on" if href == active else ""}">{label}</a>' for href, label in links)
     if config.soc_url:
         nav += f'<a href="{e(config.soc_url, quote=True)}" rel="noreferrer">Open platform</a>'
@@ -499,6 +502,11 @@ def render_overview(store: Store, config, scope: Scope, now: datetime) -> bytes:
         f'<div class="d">{counts["operations"]:,} kinds of operation recorded</div></a>'
         f'<a class="tile" href="/changes"><div class="l">Open changes</div><div class="v">{counts["open_changes"]:,}</div>'
         f'<div class="d">since the baseline</div></a>')
+    if config.adv_enabled:
+        known = advisories.overview(store)
+        tiles += (f'<a class="tile" href="/advisories?show=matching"><div class="l">Published advisories</div>'
+                  f'<div class="v">{known["matching"]:,}</div><div class="d">concern {known["targets"]:,} devices or products here, '
+                  f'of {known["advisories"]:,} known</div></a>')
     body = (
         f'<h1>Network overview</h1><p class="sub">Devices, conversations and industrial operations, as the platform\'s sensor '
         f'recorded them. {("Last read " + e(synced) + " UTC.") if synced else ""}</p>{status_notice(store, now)}'
@@ -653,7 +661,10 @@ def render_device(store: Store, config, scope: Scope, asset: dict) -> bytes:
             f'{conversation_table([row for row in conversations if row["src"] == ip], ip)}</div>'
             f'<div class="card"><h2>Industrial operations</h2><p class="note">Decoded by the sensor, to and from this device.</p>'
             f'{operation_table(store.operations(ip=ip, limit=300))}</div>'
-            f'<div class="card"><h2>Changes</h2>{changes_table(store.changes(ip=ip, limit=100))}</div>')
+            + (f'<div class="card"><h2>Published advisories</h2><p class="note">Advisories that name this device\'s model, '
+               f'or a vulnerability a scan found on it.</p>{match_table(advisories.match_rows(store, target=ip), with_target=False)}</div>'
+               if config.adv_enabled else "")
+            + f'<div class="card"><h2>Changes</h2>{changes_table(store.changes(ip=ip, limit=100))}</div>')
     return page(asset["name"] or ip, "/devices", body, config)
 
 
@@ -729,6 +740,161 @@ def render_changes(store: Store, config, now: datetime, show: str) -> bytes:
     return page("Changes", "/changes", body, config)
 
 
+# ---- published advisories ------------------------------------------------------------
+HOW = {"finding": "A scan found its CVE", "device": "Model the device announces", "watch": "On your list of products",
+       "software": "Software banner (possible)"}
+
+
+def external_link(url: str, text: str) -> str:
+    if not re.match(r"https?://[^\s\"'<>]+$", url or ""):
+        return e(text)
+    return f'<a href="{e(url, quote=True)}" rel="noreferrer noopener">{e(text)}</a>'
+
+
+def advisory_link(advisory_id: str, text: str) -> str:
+    return f'<a href="/advisories/{urllib.parse.quote(advisory_id, safe="")}">{e(text)}</a>'
+
+
+def target_link(target: str) -> str:
+    if target.startswith("watch:"):
+        return f'<span class="tag">your list</span> {e(target[len("watch:"):])}'
+    return node_link(target)
+
+
+def score_cell(item: dict) -> str:
+    parts = []
+    if item.get("score"):
+        parts.append(f'{float(item["score"]):.1f}')
+    if item.get("exploited"):
+        parts.append('<span class="chip"><span class="sw high"></span>Exploited</span>')
+    return " ".join(parts)
+
+
+def cve_list(cves: list[str], limit: int = 4) -> str:
+    text = ", ".join(cves[:limit]) + (f" and {len(cves) - limit} more" if len(cves) > limit else "")
+    return f'<span class="note">{e(text)}</span>' if cves else ""
+
+
+def match_table(rows: list[dict], with_target: bool = True) -> str:
+    if not rows:
+        return '<p class="note">None.</p>'
+    out = ['<div class="scroll"><table><thead><tr><th>Advisory</th>' + ("<th>Concerns</th>" if with_target else "")
+           + '<th>How</th><th>Version</th><th>CVSS</th><th>Published</th><th>First matched (UTC)</th></tr></thead><tbody>']
+    for row in rows:
+        out.append(f'<tr><td>{advisory_link(row["advisory"], row["source"] + " " + row["ident"])}<span class="note">{e(row["title"])}</span>'
+                   f'{cve_list(row["cves"])}</td>' + (f'<td class="k">{target_link(row["target"])}</td>' if with_target else "")
+                   + f'<td>{e(HOW.get(row["how"], row["how"]))}<span class="note">{e(row["detail"] or "")}</span></td>'
+                   f'<td>{e(row["status"] or "")}</td><td class="k">{score_cell(row)}</td><td class="k">{e((row["published"] or "")[:10])}</td>'
+                   f'<td class="k">{e(short_date(row["first_seen"]))}</td></tr>')
+    out.append("</tbody></table></div>")
+    return "".join(out)
+
+
+def render_advisories(store: Store, config, show: str, source: str, text: str) -> bytes:
+    if not config.adv_enabled:
+        body = ('<h1>Published advisories</h1><div class="card notice">Turned off on this machine (<code>TD_ADV_ENABLED=0</code>). '
+                'Turn it on with <code>scripts/install.sh network --advisories on</code>.</div>')
+        return page("Advisories", "/advisories", body, config)
+    counts = advisories.overview(store)
+    feeds = store.meta("advisory_feeds", {}) or {}
+    status = store.meta("advisory_status", {}) or {}
+    problems = [f'{e(name)}: {e(entry["error"])}' for name, entry in feeds.items() if (entry or {}).get("error")]
+    waiting = sum(int((entry or {}).get("waiting") or 0) for entry in feeds.values())
+    notice = ""
+    lines = ([f"Some advisories could not be fetched. {'<br>'.join(problems)}"] if problems else []) + (
+        [f"{waiting:,} advisory documents are still being fetched; matches by model fill in over the next passes."] if waiting else [])
+    if not feeds and not counts["advisories"]:
+        lines.append("No advisories have been fetched yet. The first fetch starts with the next pass over the platform.")
+    if status and not status.get("findings_read", True):
+        lines.append("Vulnerability findings could not be read from the platform, so matches by CVE are not up to date.")
+    if lines:
+        notice = f'<div class="card notice">{"<br>".join(lines)}</div>'
+    tiles = (f'<a class="tile hero" href="/advisories?show=matching"><div class="l">Concern this site</div><div class="v">{counts["matching"]:,}</div>'
+             f'<div class="d">advisories, on {counts["targets"]:,} devices or listed products</div></a>'
+             f'<a class="tile" href="/advisories"><div class="l">Advisories known</div><div class="v">{counts["advisories"]:,}</div>'
+             f'<div class="d">{counts["titles_only"]:,} known by title only so far</div></a>'
+             f'<a class="tile" href="/advisories?source=CISA+KEV"><div class="l">Known to be exploited</div><div class="v">{counts["kev"]:,}</div>'
+             '<div class="d">vulnerabilities in CISA\'s catalogue</div></a>')
+    sources = sorted({row["source"] for row in store.db.execute("SELECT DISTINCT source FROM advisories")})
+    query = lambda **kw: "/advisories?" + urllib.parse.urlencode({k: v for k, v in kw.items() if v})  # noqa: E731
+    filters = [f'<a href="{query(q=text)}" class="{"" if show or source else "on"}">All</a>',
+               f'<a href="{query(show="matching", q=text)}" class="{"on" if show == "matching" else ""}">Concerning this site</a>']
+    filters += [f'<a href="{query(source=name, q=text)}" class="{"on" if source == name else ""}">{e(name)}</a>' for name in sources[:12]]
+    rows = advisories.advisory_rows(store, source=source, text=text, only_matching=show == "matching", limit=101)
+    shown_all = len(rows) <= 100
+    rows = rows[:100]
+    search = ('<form method="get" action="/advisories" class="filters" role="search">'
+              + (f'<input type="hidden" name="source" value="{e(source, quote=True)}">' if source else "")
+              + (f'<input type="hidden" name="show" value="{e(show, quote=True)}">' if show else "")
+              + f'<input type="search" name="q" value="{e(text, quote=True)}" placeholder="Vendor, product, CVE or advisory number" '
+              'aria-label="Search advisories" maxlength="100"><button type="submit">Search</button></form>')
+    lines = []
+    for row in rows:
+        detail = {"title": "title only so far", "stale": "updated; fetching again", "unreadable": "document could not be read"}.get(row["detail"], "")
+        lines.append(f'<tr><td>{advisory_link(row["id"], row["source"] + " " + row["ident"])}'
+                     + (f' <span class="tag">{e(detail)}</span>' if detail else "")
+                     + f'<span class="note">{e(row["title"])}</span>{cve_list(row["cves"])}</td>'
+                     f'<td class="k">{score_cell(row)}</td><td class="n">{row["concerns"] or ""}</td>'
+                     f'<td class="k">{e((row["published"] or "")[:10])}</td><td class="k">{e((row["updated"] or "")[:10])}</td></tr>')
+    table = ('<div class="scroll"><table><thead><tr><th>Advisory</th><th>CVSS</th><th class="n">Concerns</th><th>Published</th>'
+             f'<th>Updated</th></tr></thead><tbody>{"".join(lines)}</tbody></table></div>') if lines else '<p class="note">None match.</p>'
+    watch = (", ".join(e(phrase) for phrase in config.adv_watch) if config.adv_watch else
+             'none. Add the products this site runs to <code>TD_ADV_WATCH</code>, for example '
+             '<code>Honeywell Experion PKS; Honeywell C300</code>, for those that do not announce themselves on the network.')
+    source_rows = "".join(
+        f'<tr><td>{e(name)}</td><td class="k">{e(str((entry or {}).get("kind", "")))}</td>'
+        f'<td>{external_link(str((entry or {}).get("url", "")), str((entry or {}).get("url", "")))}</td>'
+        f'<td class="k">{e(short_date(str((entry or {}).get("checked", ""))))}</td>'
+        f'<td>{e(str((entry or {}).get("error") or "ok"))}</td></tr>' for name, entry in sorted(feeds.items()))
+    body = (f'<h1>Published advisories</h1><p class="sub">Security advisories from national CERTs and CISA, matched against the devices '
+            f'here, the vulnerabilities scans found on them, and the products this site lists as its own.</p>{notice}'
+            f'<div class="tiles">{tiles}</div>'
+            f'<div class="card"><h2>What concerns this site</h2><p class="note">Newest first. Medium and high become tickets through the '
+            f'Changes list, once per device or listed product.</p>{match_table(advisories.match_rows(store, limit=400))}</div>'
+            f'<h2>All advisories</h2>{search}<div class="filters">{"".join(filters)}</div>'
+            f'<div class="card">{table}' + ("" if shown_all else '<p class="note">The 100 most recently updated are shown; search to narrow the list.</p>')
+            + '</div>'
+            f'<div class="card"><h2>Products on your list</h2><p class="note">{watch}</p></div>'
+            + (f'<div class="card"><h2>Sources</h2><div class="scroll"><table><thead><tr><th>Name</th><th>Format</th><th>Address</th>'
+               f'<th>Last checked (UTC)</th><th>State</th></tr></thead><tbody>{source_rows}</tbody></table></div></div>' if source_rows else "")
+            + '<p class="note">A match by model is as good as what the device announces: vendors name products differently from the way '
+              'devices describe themselves, so a device can be missed. A match on your list of products is by name only and says nothing '
+              'about the version you run. "Exploited" means CISA lists one of the advisory\'s CVEs as used in real attacks.</p>')
+    return page("Advisories", "/advisories", body, config)
+
+
+def render_advisory(config, item: dict) -> bytes:
+    products = "".join(
+        f'<tr><td>{e(row["vendor"])}</td><td>{e(row["product"])}</td><td>{e(", ".join("all versions" if version == "vers:all/*" else version for version in json.loads(row["versions"] or "[]")) or "not stated")}</td></tr>'
+        for row in item["products"])
+    refs = ", ".join(e(ref) for ref in item["refs"]) or "none given"
+    matches = "".join(
+        f'<tr><td class="k">{target_link(row["target"])}</td><td>{e(HOW.get(row["how"], row["how"]))}</td><td>{e(row["status"] or "")}</td>'
+        f'<td>{e(row["detail"] or "")}</td><td class="k">{e(short_date(row["first_seen"]))}</td></tr>' for row in item["matches"])
+    related = ", ".join(advisory_link(row["id"], f'{row["source"]} {row["ident"]}') for row in item["related"])
+    facts = [("Published by", e(item["source"])), ("Identifier", e(item["ident"])),
+             ("Published", e((item["published"] or "")[:10])), ("Updated", e((item["updated"] or "")[:10])),
+             ("CVSS", f'{item["score"]:.1f}' if item["score"] else "not stated"),
+             ("Exploited", "Yes, CISA lists it as used in real attacks" if item["exploited"] else "Not in CISA's catalogue"),
+             ("References", refs), ("Same vulnerabilities elsewhere", related),
+             ("Original", external_link(item["link"], item["link"]) if item["link"] else "")]
+    listing = "".join(f"<dt>{label}</dt><dd>{value}</dd>" for label, value in facts if value)
+    detail = {"title": "Only the title is known so far: the advisory itself has not been fetched yet.",
+              "stale": "The publisher has updated this advisory; the new version is fetched on the next pass.",
+              "unreadable": "The advisory document could not be read; see the original."}.get(item["detail"], "")
+    body = (f'<p class="note"><a href="/advisories">← All advisories</a></p><h1>{e(item["title"])}</h1>'
+            + (f'<div class="card notice">{e(detail)}</div>' if detail else "")
+            + f'<div class="card"><dl>{listing}</dl>' + (f'<p>{e(item["summary"])}</p>' if item["summary"] else "") + '</div>'
+            + '<div class="card"><h2>Products named</h2>'
+            + (f'<div class="scroll"><table><thead><tr><th>Vendor</th><th>Product</th><th>Affected versions</th></tr></thead>'
+               f'<tbody>{products}</tbody></table></div>' if products else '<p class="note">None named in a form that can be read.</p>')
+            + '</div><div class="card"><h2>Here</h2>'
+            + (f'<div class="scroll"><table><thead><tr><th>Concerns</th><th>How</th><th>Version</th><th>Detail</th><th>First matched (UTC)</th>'
+               f'</tr></thead><tbody>{matches}</tbody></table></div>' if matches else '<p class="note">Nothing on this site matches it.</p>')
+            + '</div>')
+    return page(item["ident"], "/advisories", body, config)
+
+
 def make_handler(config, open_store: Callable[[], Store], scope: Scope):
     expected = base64.b64encode(f"{config.web_user}:{config.web_password}".encode())
     realm = re.sub(r"[^A-Za-z0-9 ._-]", "", config.brand_name) + " network"
@@ -750,7 +916,7 @@ def make_handler(config, open_store: Callable[[], Store], scope: Scope):
             self.send_header("X-Frame-Options", "DENY")
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("Content-Security-Policy",
-                             "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'")
+                             "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
             for key, value in (extra or {}).items():
                 self.send_header(key, value)
             self.end_headers()
@@ -798,6 +964,13 @@ def make_handler(config, open_store: Callable[[], Store], scope: Scope):
                     return self._send(200, render_operations(store, config, first("show")))
                 if path == "/changes":
                     return self._send(200, render_changes(store, config, now, first("show")))
+                if path == "/advisories":
+                    return self._send(200, render_advisories(store, config, first("show"), first("source"), first("q")))
+                if path.startswith("/advisories/"):
+                    item = advisories.one_advisory(store, urllib.parse.unquote(path[len("/advisories/"):])[:300])
+                    if item is None:
+                        return self._send(404, page("Not found", "/advisories", "<h1>Advisory not found</h1>", config))
+                    return self._send(200, render_advisory(config, item))
                 return self._send(404, page("Not found", "", "<h1>Page not found</h1>", config))
             finally:
                 store.close()
