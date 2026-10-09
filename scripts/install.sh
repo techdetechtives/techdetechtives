@@ -113,6 +113,15 @@ Only 'scripts/install.sh platform' and the scripts in platform/ are run here."
   fi
 }
 
+container_running() {
+  # The listing is read in full before it is searched: piped straight into
+  # "grep -q", the search stops at its first match while docker is still
+  # writing, and with pipefail a running container can read as not running.
+  local names
+  names="$(docker ps --format '{{.Names}}')" || return 1
+  grep -qx "$1" <<< "$names"
+}
+
 require_docker() {
   command -v docker >/dev/null 2>&1 || die "docker is not installed on this host"
   docker compose version >/dev/null 2>&1 || die "the docker compose plugin is not installed"
@@ -286,13 +295,13 @@ cmd_network() {
   not_on_platform network "the ticketing machine"
   require_docker
   if [[ "${1:-}" == "--accept" ]]; then
-    docker ps --format '{{.Names}}' | grep -qx td-netmap \
+    container_running td-netmap \
       || die "the network inventory is not running (start it with: scripts/install.sh network)"
     docker exec td-netmap python -m td_net.main --accept || die "the baseline was not changed (see the line above)"
     return 0
   fi
   if [[ "${1:-}" == "--fetch-advisories" ]]; then
-    docker ps --format '{{.Names}}' | grep -qx td-netmap \
+    container_running td-netmap \
       || die "the network inventory is not running (start it with: scripts/install.sh network)"
     docker exec td-netmap python -m td_net.main --advisories || die "advisories could not be fetched (see the lines above)"
     return 0

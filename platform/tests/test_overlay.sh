@@ -133,6 +133,26 @@ echo "@load custom/techdetechtives" > "$TD_ZEEK_STARTUP_FILE"
 check "status waits for Zeek to restart" bash -c '! TD_ZEEK_STARTED_AT=1000 bash "$0" layer2 status' "$OVERLAY"
 check "status passes once Zeek started after the change" bash -c 'TD_ZEEK_STARTED_AT=$(( $(date +%s) + 60 )) bash "$0" layer2 status' "$OVERLAY"
 check "status fails when Zeek has stopped" bash -c '! TD_ZEEK_RUNNING_CMD=false TD_ZEEK_STARTED_AT=$(( $(date +%s) + 60 )) bash "$0" layer2 status' "$OVERLAY"
+# The real check, against a stand-in for docker that, like docker, is still
+# writing its listing after the line being looked for. A search that stops at
+# its first match breaks the pipe, and with pipefail that once read as "Zeek
+# is not running" on a platform where it was.
+mkdir -p "$WORK/dockerbin"
+cat > "$WORK/dockerbin/docker" <<'STUB'
+#!/bin/bash
+case "$1" in
+  ps)  [[ "$FAKE_ZEEK" == "absent" ]] || echo "so-zeek"; sleep 0.2; echo "so-soc"; echo "so-nginx" ;;
+  top) echo "UID PID CMD"; echo "root 1 /bin/bash /usr/local/bin/zeek.sh"
+       [[ "$FAKE_ZEEK" == "idle" ]] || echo "zeek 2 /opt/zeek/bin/zeek -i bond0 -U .status"
+       sleep 0.2; echo "zeek 3 /usr/bin/bash /opt/zeek/share/zeekctl/scripts/run-zeek" ;;
+esac
+STUB
+chmod +x "$WORK/dockerbin/docker"
+real_check() { env -u TD_ZEEK_RUNNING_CMD PATH="$WORK/dockerbin:$PATH" FAKE_ZEEK="$1" TD_ZEEK_STARTED_AT=$(( $(date +%s) + 60 )) bash "$OVERLAY" layer2 status; }
+check "Zeek is found running while docker is still listing" real_check up
+not() { ! "$@"; }
+check "a Zeek container with no Zeek process is not running" not real_check idle
+check "no Zeek container is not running" not real_check absent
 # A platform upgrade changes the default list while the watch is on: "off" must still hand the list back to the platform.
 sed -i 's/        - oui-logging/        - oui-logging\n        - added-by-upgrade/' "$WORK/default/salt/zeek/defaults.yaml"
 overlay layer2 off --no-salt > /dev/null 2>&1

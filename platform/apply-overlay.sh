@@ -372,8 +372,15 @@ zeek_running() {
   if [[ -n "${TD_ZEEK_RUNNING_CMD:-}" ]]; then $TD_ZEEK_RUNNING_CMD; return; fi      # for the tests
   if [[ -n "${TD_ZEEK_RUNNING:-}" ]]; then [[ "$TD_ZEEK_RUNNING" == "1" ]]; return; fi
   command -v docker >/dev/null 2>&1 || return 1
-  docker ps --format '{{.Names}}' 2>/dev/null | grep -qx 'so-zeek' || return 1
-  docker top so-zeek 2>/dev/null | grep -q 'bin/zeek -'
+  # Each listing is read in full before it is searched. Piped straight into
+  # "grep -q", the search stops at its first match while docker is still
+  # writing; docker is then stopped by the closed pipe, and with pipefail the
+  # check read as "not running" on a platform where Zeek was running.
+  local names procs
+  names="$(docker ps --format '{{.Names}}' 2>/dev/null)" || return 1
+  grep -qx 'so-zeek' <<< "$names" || return 1
+  procs="$(docker top so-zeek 2>/dev/null)" || return 1
+  grep -q 'bin/zeek -' <<< "$procs"
 }
 
 zeek_wait_running() {
