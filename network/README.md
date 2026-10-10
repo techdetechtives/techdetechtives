@@ -175,12 +175,12 @@ The container runs without privileges, as the account that first installed it (r
 
 Settings are in `config/techdetechtives.env` under "Network inventory"; after changing them, run `scripts/install.sh network` again.
 
-## Not yet run on a live system
+## On a live system
 
-This part was built and tested against a stand-in for the platform (76 automated tests, 20 of them for the advisories, and the pages checked by eye with a simulated plant). On a real platform, these are the first suspects if something is wrong:
+This part was built and tested against a stand-in for the platform (76 automated tests, 20 of them for the advisories, and the pages checked by eye with a simulated plant). On 2026-10-10 it ran against a live Security Onion 2.4.211: the image built, it read more than 10,000 connection records and built an inventory of 39 devices and 482 conversations, with EtherNet/IP decoded, and all five advisory sources were fetched. What that run did not cover, and what to check first if something is wrong:
 
-- **Field names.** They were taken from Security Onion 2.4.211's ingest settings and the protocol analyzers' source, not from live records. A field that the platform cannot group on becomes a warning on the pages, and the rest keeps working.
-- **Late records.** Records are picked up by the time the sensor's agent read them, so a session that lasted a day is counted when it is finally written. They are read five minutes after that time (`TD_NET_LAG_SECONDS`), to give them time to reach the platform. A record that takes longer is not in the inventory; the next pass notices, and the pages then say how many and suggest a longer wait. How long the journey takes on your platform is not known yet.
-- **The container image** has not been built, and the pages have not been served from it.
-- **Alerts to the platform** go to the data stream `logs-netmap.alerts-techdetechtives`, which the platform should create on first use. `docker logs td-netmap` shows its answer if it refuses.
+- **No connection records.** The inventory is built from Zeek's records in the platform. If `scripts/verify.sh network` says there are none while Zeek is running, check on the platform that its own Elastic Agent is installed (`systemctl status elastic-agent`): that agent is what carries Zeek's logs into Elasticsearch. On the live system it was missing, and `sudo salt-call state.apply elasticfleet.install_agent_grid` on the manager installed it.
+- **Field names.** They were taken from Security Onion 2.4.211's ingest settings and the protocol analyzers' source. The live run built its inventory with them. A field that the platform cannot group on becomes a warning on the pages, and the rest keeps working.
+- **Late records.** Records are picked up by the time the sensor's agent read them, so a session that lasted a day is counted when it is finally written. They are read five minutes after that time (`TD_NET_LAG_SECONDS`), to give them time to reach the platform. A record that takes longer is not in the inventory; the next pass notices, and the pages then say how many and suggest a longer wait.
+- **Alerts to the platform** go to the data stream `logs-netmap.alerts-techdetechtives`, which the platform should create on first use. The platform accepted the key, but no change had occurred on the live system, so nothing has been written there yet. `docker logs td-netmap` shows its answer if it refuses.
 - **Large networks.** Records are read an hour at a time, and a stretch with more than 200,000 different groups is read again in halves, down to one minute; only beyond that is anything left out, and the pages say so. It has only been run with a few thousand groups.

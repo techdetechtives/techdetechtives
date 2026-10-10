@@ -162,6 +162,11 @@ PY
     else
       fail "overlay test (run: platform/tests/test_overlay.sh)"
     fi
+    if bash "$ROOT/vulnerability/tests/test_gb_wait.sh" >/dev/null 2>&1; then
+      pass "wait for Greenbone's data containers"
+    else
+      fail "wait for Greenbone's data containers (run: vulnerability/tests/test_gb_wait.sh)"
+    fi
     if python3 -m unittest discover -s "$ROOT/ticketing/tests" >/dev/null 2>&1; then
       pass "forwarder tests"
     else

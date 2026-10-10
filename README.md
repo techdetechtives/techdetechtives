@@ -155,7 +155,7 @@ Upgrade the platform with its own upgrade tool (`soup`). The overlay lives in th
 
 ## Status
 
-Version 0.10.0. What has and has not been exercised is listed in [MODIFICATIONS.md](MODIFICATIONS.md#test-status). In short: the overlay, installers, forwarder, connector and notebook logic have automated tests against stand-ins; on a live Security Onion 2.4.211 the console pages, both access keys, DFIR-IRIS and the forwarder's connections were confirmed. Not yet seen on a live system: a rule firing, an alert becoming a ticket, the workbench image and Spark, Greenbone and its connector, the honeypot, the rule-enable setting, the layer 2 watch, the network inventory, and a live fetch of the advisory feeds.
+Version 0.10.0. What has and has not been exercised is listed in [MODIFICATIONS.md](MODIFICATIONS.md#test-status). In short: the overlay, installers, forwarder, connector and notebook logic have automated tests against stand-ins. On a live Security Onion 2.4.211 with a second machine, these were confirmed: the console pages and access keys, the layer 2 watch switched on, DFIR-IRIS and the forwarder with alerts becoming tickets, Greenbone and its connector starting and connecting, the network inventory reading the platform, a live fetch of the advisory feeds, and the workbench image with Spark. Not yet seen on a live system: a TechDetechtives rule firing, newly imported rules arriving switched on, a Greenbone scan and its findings, an alert from the layer 2 watch or the inventory, and the honeypot.
 
 ## Licence
 
