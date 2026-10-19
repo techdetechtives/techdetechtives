@@ -151,6 +151,21 @@ Field names follow ECS, as on the platform. [docs/FIELD-MAPPING.md](docs/FIELD-M
 - **Notebooks:** add them under `analytics/notebooks/`. New notebooks in that folder are GPL-3.0 if they build on the existing ones.
 - **Platform settings** (retention, sensors, integrations): use the console's Administration > Configuration screen. Those settings are stored by the platform and survive upgrades.
 
+## Container images
+
+Each release publishes the images to the GitHub Container Registry, built by [`.github/workflows/images.yml`](.github/workflows/images.yml) from this repository:
+
+| Image | Licence |
+| --- | --- |
+| `ghcr.io/techdetechtives/analytics` | GPL-3.0 (derived from HELK) |
+| `ghcr.io/techdetechtives/forwarder` | MIT |
+| `ghcr.io/techdetechtives/vuln-connector` | MIT |
+| `ghcr.io/techdetechtives/netmap` | MIT |
+| `ghcr.io/techdetechtives/honeypot-shipper` | MIT |
+| `ghcr.io/techdetechtives/opencanary` | BSD-3-Clause (OpenCanary, unmodified) |
+
+Tags follow the release (`0.10.0`, `0.10`); `latest` is only set by full releases, not pre-releases. The installers still build the images locally, so a site without registry access needs nothing from it.
+
 ## Upgrading
 
 Upgrade the platform with its own upgrade tool (`soup`). The overlay lives in the platform's local override folders and rule repositories, which upgrades keep. After a major-version upgrade, run `sudo scripts/verify.sh platform` and compare against the new upstream release with `scripts/fetch-upstream.sh`.

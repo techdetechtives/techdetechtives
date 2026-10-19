@@ -1,0 +1,158 @@
+# TechDetechtives: build the container images and publish them to the
+# GitHub Container Registry (ghcr.io/techdetechtives/<image>).
+# Copyright (c) 2026 TechDetechtives. MIT licence (see LICENSE).
+#
+# Runs when a release (or pre-release) is published, and by hand from the
+# Actions tab. Pull requests and pushes to main only build, never publish.
+#
+# Tags pushed for release v0.10.0:  0.10.0, 0.10, sha-<short>
+# "latest" is pushed only for full releases, never for pre-releases.
+
+name: Container images
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Push the images to ghcr.io (otherwise build only)"
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - "analytics/**"
+      - "honeypot/**"
+      - "network/**"
+      - "ticketing/forwarder/**"
+      - "vulnerability/connector/**"
+      - ".dockerignore"
+      - "upstream.lock"
+      - ".github/workflows/images.yml"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Repository checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test dependencies
+        run: python -m pip install --quiet pyyaml
+      - name: Static checks and tests (scripts/verify.sh repo)
+        run: scripts/verify.sh repo
+
+  image:
+    name: ${{ matrix.name }}
+    needs: checks
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: analytics
+            context: analytics
+            dockerfile: analytics/Dockerfile
+            licence: GPL-3.0-only
+            title: TechDetechtives analytics workbench (Jupyter + Spark, derived from HELK)
+          - name: forwarder
+            context: ticketing/forwarder
+            dockerfile: ticketing/forwarder/Dockerfile
+            licence: MIT
+            title: TechDetechtives alert-to-ticket forwarder (DFIR-IRIS)
+          - name: vuln-connector
+            context: .
+            dockerfile: vulnerability/connector/Dockerfile
+            licence: MIT
+            title: TechDetechtives vulnerability connector and dashboards (Greenbone)
+          - name: netmap
+            context: .
+            dockerfile: network/app/Dockerfile
+            licence: MIT
+            title: TechDetechtives network and OT inventory
+          - name: honeypot-shipper
+            context: .
+            dockerfile: honeypot/shipper/Dockerfile
+            licence: MIT
+            title: TechDetechtives honeypot shipper
+          - name: opencanary
+            context: honeypot/opencanary
+            dockerfile: honeypot/opencanary/Dockerfile
+            licence: BSD-3-Clause
+            title: OpenCanary (Thinkst), unmodified, at the commit pinned in upstream.lock
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decide whether to publish
+        id: mode
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]] || [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.publish }}" == "true" ]]; then
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ "${{ github.event_name }}" == "release" && "${{ github.event.release.prerelease }}" == "false" ]]; then
+            echo "latest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "latest=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pinned OpenCanary commit
+        id: pins
+        run: |
+          commit="$(awk -F'|' '$1=="opencanary" {print $4}' upstream.lock)"
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { echo "opencanary commit not found in upstream.lock" >&2; exit 1; }
+          echo "opencanary=$commit" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Sign in to ghcr.io
+        if: steps.mode.outputs.push == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
+          flavor: |
+            latest=${{ steps.mode.outputs.latest }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+            type=ref,event=pr
+          labels: |
+            org.opencontainers.image.title=${{ matrix.title }}
+            org.opencontainers.image.vendor=TechDetechtives
+            org.opencontainers.image.licenses=${{ matrix.licence }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - name: Build${{ steps.mode.outputs.push == 'true' && ' and push' || '' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: ${{ steps.mode.outputs.push == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            OPENCANARY_COMMIT=${{ steps.pins.outputs.opencanary }}
+          provenance: false
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
