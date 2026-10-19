@@ -23,6 +23,8 @@ Security Onion's code and image are **not** in this repository, and neither are 
 
 ![TechDetechtives design](docs/images/TechDetechtives-Design.png)
 
+**Building a test lab from scratch on VMware ESXi?** Follow [lab/README.md](lab/README.md): VM plan, virtual network with a monitor port group, every install phase in order, OT simulators and a validation runbook.
+
 ## Requirements
 
 - **Platform host(s):** a working Security Onion 3.x installation (see its hardware requirements). The overlay runs on the manager node.

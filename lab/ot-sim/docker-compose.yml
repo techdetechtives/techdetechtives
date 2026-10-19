@@ -1,0 +1,16 @@
+# TechDetechtives lab OT simulators. Run on the ot-sim VM (TD-OT segment) only.
+#   docker compose up -d --build      start
+#   docker compose logs -f            watch what the test commands send
+services:
+  td-ot-sim:
+    build: .
+    container_name: td-ot-sim
+    restart: unless-stopped
+    environment:
+      OT_SIMS: "modbus,s7,dnp3,experion"
+    ports:
+      - "102:102"
+      - "502:502"
+      - "20000:20000"
+      - "55553:55553"
+      - "55555:55555"
