@@ -51,3 +51,19 @@ sudo scripts/install.sh platform --brand-image-url none
 
 - **The Security Onion console** keeps its own logo and licence notices. The Elastic License 2.0 forbids removing the licensor's notices, and its name and logo are registered trademarks.
 - **DFIR-IRIS and Greenbone** run unmodified with their own interfaces.
+
+## Product marks
+
+Each part of TechDetechtives has its own mark in `products/`: the TechDetechtives shield with that part's symbol inside. Red marks the part that acts; white marks what it acts on.
+
+| Part | Symbol | Files |
+| --- | --- | --- |
+| Security monitoring and hunting (platform) | The detective's lens over a signal | `monitoring-mark` |
+| Case management (`ticketing/`) | A case file, closed with a check | `cases-mark` |
+| Vulnerability analysis (`vulnerability/`) | A lock left open | `vulnerabilities-mark` |
+| Network and OT visibility (`network/`) | A hub and the devices it talks to | `network-mark` |
+| TD Honeypot (`honeypot/`) | A honeycomb cell with a baited hook | `honeypot-mark`, `honeypot-banner` (top of `honeypot/README.md`), `honeypot-social` |
+
+Each mark comes as SVG, as a 512 x 512 PNG and as a 256 x 256 PNG (`-256.png`). The other products in the family have their own repositories, each with its own mark: TDZer0, TDCaution-CTI and detechEDR.
+
+The marks are drawn from shapes by `tools/brand/family.py` in the `websites` repository, which keeps the whole family in step and also feeds the website. Change them there and copy the results here.

@@ -1,3 +1,5 @@
+<p align="center"><img src="../branding/products/honeypot-banner.png" width="640" alt="TD Honeypot, deception by TechDetechtives"></p>
+
 # Honeypot
 
 A decoy machine on your internal network. It offers services that look real (a web sign-in page, FTP, Remote Desktop, databases and more) and has no legitimate users, so **any contact with it is worth looking at**: a port sweep, a curious insider, malware spreading sideways, or an intruder exploring after getting in.
