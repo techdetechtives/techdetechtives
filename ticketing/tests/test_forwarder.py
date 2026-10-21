@@ -260,6 +260,26 @@ class ForwarderTests(unittest.TestCase):
         self.assertEqual(ticket["alert_source_content"]["rule"]["uuid"], "fb81b1e9")
         self.assertRegex(ticket["alert_source_event_time"], r"^2026-10-04T11:58:20\.\d{6}$")
 
+    def test_sandbox_alert_carries_its_report_and_screenshot(self):
+        verdict = {"_id": "tdzer0-0123456789abcdef", "_index": "logs-tdzer0.verdicts-techdetechtives", "_source": {
+            "@timestamp": stamp(100), "tags": ["alert", "sandbox", "tdzer0"],
+            "rule": {"name": "TDZer0: malicious file invoice.exe (AgentTesla)", "category": "sandbox"},
+            "event": {"severity": 4, "module": "tdzer0", "url": "https://tdzer0.soc.local/jobs/0123456789abcdef"},
+            "hash": {"md5": "cd" * 16},
+            "tdzer0": {"key_screenshot": {"url": "https://tdzer0.soc.local/jobs/0123456789abcdef/files/shots/0002.jpg",
+                                          "caption": "Guest desktop 4 s into the run",
+                                          "thumbnail_jpeg_b64": "/9j/" + "A" * 1000}}}}
+        FakePlatform.docs = [verdict]
+        self.cycle()
+        ticket = FakeIris.created[0]
+        self.assertEqual(ticket["alert_title"], "[tdzer0] TDZer0: malicious file invoice.exe (AgentTesla)")
+        self.assertIn("Investigate: https://tdzer0.soc.local/jobs/0123456789abcdef", ticket["alert_description"])
+        self.assertIn("Screenshot: https://tdzer0.soc.local/jobs/0123456789abcdef/files/shots/0002.jpg",
+                      ticket["alert_description"])
+        self.assertEqual(ticket["alert_context"]["Screenshot shows"], "Guest desktop 4 s into the run")
+        # The small picture itself travels in the attached event.
+        self.assertTrue(ticket["alert_source_content"]["tdzer0"]["key_screenshot"]["thumbnail_jpeg_b64"].startswith("/9j/"))
+
     def test_oversized_event_is_not_attached(self):
         FakePlatform.docs = [alert("big", 100, 3, extra={"payload": "x" * 300_000})]
         self.cycle()

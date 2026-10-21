@@ -55,6 +55,11 @@ SUMMARY_FIELDS = [
     ("Community ID", "network.community_id"),
     ("Rule category", "rule.category"),
     ("Rule ID", "rule.uuid"),
+    # Where to continue the investigation (ECS event.url), for example the
+    # TDZer0 sandbox report, and the picture that best shows what happened.
+    ("Investigate", "event.url"),
+    ("Screenshot", "tdzer0.key_screenshot.url"),
+    ("Screenshot shows", "tdzer0.key_screenshot.caption"),
 ]
 MAX_CONTENT_BYTES = 200_000
 MAX_FAILURES_PER_ALERT = 5
