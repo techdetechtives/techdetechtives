@@ -1,0 +1,125 @@
+# TechDetechtives rule factory: server software it knows how to watch on the host.
+# Copyright (c) 2026 TechDetechtives. MIT licence (see LICENSE).
+#
+# When an exploited remote-code-execution CVE names one of these products, the
+# factory drafts a Sigma rule: "this product's server process starts a shell",
+# which is what the exploit leads to whatever its request looks like. The
+# sample fields become the rule's test events.
+#
+#   match            words, any of which in CISA's vendor or product name picks this entry
+#   platform         linux or windows (the shell list the rule uses)
+#   parent           Sigma selection for the server process
+#   sample_parent    a real-looking parent for the test event
+#
+# PHP, Apache, nginx, IIS and Tomcat are left out: the standing rules
+# techdetechtives_web_server_spawns_shell_{linux,windows}.yml already cover them.
+products:
+  - name: Atlassian Confluence
+    match: [confluence]
+    platform: linux
+    parent:
+      ParentImage|endswith: ['/java']
+      ParentCommandLine|contains: ['confluence']
+    sample_parent:
+      ParentImage: /opt/atlassian/confluence/jre/bin/java
+      ParentCommandLine: /opt/atlassian/confluence/jre/bin/java -Dconfluence.home=/var/atlassian/application-data/confluence org.apache.catalina.startup.Bootstrap start
+
+  - name: Atlassian Jira
+    match: [jira]
+    platform: linux
+    parent:
+      ParentImage|endswith: ['/java']
+      ParentCommandLine|contains: ['jira']
+    sample_parent:
+      ParentImage: /opt/atlassian/jira/jre/bin/java
+      ParentCommandLine: /opt/atlassian/jira/jre/bin/java -Djira.home=/var/atlassian/application-data/jira org.apache.catalina.startup.Bootstrap start
+
+  - name: Microsoft Exchange Server
+    match: [exchange]
+    platform: windows
+    parent:
+      ParentImage|endswith: ['\w3wp.exe', '\UMWorkerProcess.exe', '\MSExchangeHMWorker.exe']
+      ParentCommandLine|contains: ['MSExchange', 'UMWorkerProcess', 'MSExchangeHMWorker']
+    sample_parent:
+      ParentImage: C:\Windows\System32\inetsrv\w3wp.exe
+      ParentCommandLine: c:\windows\system32\inetsrv\w3wp.exe -ap "MSExchangeOWAAppPool" -v "v4.0"
+
+  - name: Microsoft SharePoint Server
+    match: [sharepoint]
+    platform: windows
+    parent:
+      ParentImage|endswith: ['\w3wp.exe']
+      ParentCommandLine|contains: ['SharePoint']
+    sample_parent:
+      ParentImage: C:\Windows\System32\inetsrv\w3wp.exe
+      ParentCommandLine: c:\windows\system32\inetsrv\w3wp.exe -ap "SharePoint - 80" -v "v4.0"
+
+  - name: Progress MOVEit Transfer
+    match: [moveit]
+    platform: windows
+    parent:
+      ParentImage|endswith: ['\w3wp.exe']
+      ParentCommandLine|contains: ['moveitdmz']
+    sample_parent:
+      ParentImage: C:\Windows\System32\inetsrv\w3wp.exe
+      ParentCommandLine: c:\windows\system32\inetsrv\w3wp.exe -ap "moveitdmz Pool" -v "v4.0"
+
+  - name: Oracle WebLogic Server
+    match: [weblogic]
+    platform: linux
+    parent:
+      ParentImage|endswith: ['/java']
+      ParentCommandLine|contains: ['weblogic']
+    sample_parent:
+      ParentImage: /u01/jdk/bin/java
+      ParentCommandLine: /u01/jdk/bin/java -Dweblogic.Name=AdminServer weblogic.Server
+
+  - name: Apache ActiveMQ
+    match: [activemq]
+    platform: linux
+    parent:
+      ParentImage|endswith: ['/java']
+      ParentCommandLine|contains: ['activemq']
+    sample_parent:
+      ParentImage: /usr/lib/jvm/java-17/bin/java
+      ParentCommandLine: /usr/lib/jvm/java-17/bin/java -Dactivemq.home=/opt/activemq -jar /opt/activemq/bin/activemq.jar start
+
+  - name: GeoServer
+    match: [geoserver]
+    platform: linux
+    parent:
+      ParentImage|endswith: ['/java']
+      ParentCommandLine|contains: ['geoserver']
+    sample_parent:
+      ParentImage: /usr/lib/jvm/java-11/bin/java
+      ParentCommandLine: /usr/lib/jvm/java-11/bin/java -DGEOSERVER_DATA_DIR=/opt/geoserver/data_dir -jar start.jar
+
+  - name: Apache OFBiz
+    match: [ofbiz]
+    platform: linux
+    parent:
+      ParentImage|endswith: ['/java']
+      ParentCommandLine|contains: ['ofbiz']
+    sample_parent:
+      ParentImage: /usr/lib/jvm/java-17/bin/java
+      ParentCommandLine: /usr/lib/jvm/java-17/bin/java -jar /opt/ofbiz/build/libs/ofbiz.jar
+
+  - name: Jenkins
+    match: [jenkins]
+    platform: linux
+    parent:
+      ParentImage|endswith: ['/java']
+      ParentCommandLine|contains: ['jenkins.war']
+    sample_parent:
+      ParentImage: /usr/bin/java
+      ParentCommandLine: /usr/bin/java -Djava.awt.headless=true -jar /usr/share/java/jenkins.war --httpPort=8080
+
+  - name: Zimbra Collaboration
+    match: [zimbra]
+    platform: linux
+    parent:
+      ParentImage|endswith: ['/java']
+      ParentCommandLine|contains: ['zimbra']
+    sample_parent:
+      ParentImage: /opt/zimbra/common/lib/jvm/java/bin/java
+      ParentCommandLine: /opt/zimbra/common/lib/jvm/java/bin/java -Dzimbra.home=/opt/zimbra -jar /opt/zimbra/jetty/start.jar

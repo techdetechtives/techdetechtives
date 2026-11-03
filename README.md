@@ -16,6 +16,7 @@ TechDetechtives is a **modified deployment built on Security Onion**, combined w
 | Vulnerability scanning | `vulnerability/` | Installs Greenbone (OpenVAS) on your own host; vulnerability dashboard, reports pages, findings into the platform, tickets for findings | Greenbone Community Edition (fetched at install, not copied here) | Connector: MIT. Greenbone itself: AGPL-3.0 and GPL-2.0 |
 | Honeypot | `honeypot/` | A decoy machine: every contact with its fake services becomes a platform alert and a ticket | OpenCanary 0.9.10 (installed into a container at install, not copied here) | Shipper: MIT. OpenCanary itself: BSD 3-Clause |
 | Network inventory | `network/` | Devices, a traffic map, industrial operations and what changed since a learned baseline, built from what the platform's sensor records; published advisories (JPCERT/CC, JVN, CISA) matched against the devices and scan findings; sends nothing to the network | Original | MIT |
+| Rule factory | `rulefactory/` | Turns newly exploited remote-code-execution flaws (CISA KEV) into tested Suricata, Sigma and YARA rules proposed as pull requests; on your network, raises a DFIR-IRIS alert when the scanner finds one on your hosts | Original; drafts from public exploit templates (Nuclei, MIT) | MIT |
 | Analyst skills | `skills/` | Guidance files for an AI assistant: 4 written for this platform, 26 selected from a community library | Community cybersecurity skills library (selected documents copied, unchanged) | TechDetechtives skills: MIT. Community skills: Apache-2.0 |
 | Scripts and docs | `scripts/`, `docs/` | Install, verify, fetch upstream | Original | MIT |
 
@@ -120,7 +121,15 @@ scripts/verify.sh network
 
 Reads the platform with the read-only key from step 2 and serves the device list, the traffic map and the list of changes on `https://<name>:8445`. It needs Zeek running on the platform. To turn changes into platform alerts and tickets, create its key on the platform with `sudo platform/create-ingest-key.sh --for network`. It also downloads published advisories from JPCERT/CC, JVN and CISA and raises the ones that concern your devices, scan findings or the products you list with `--watch "Honeywell Experion PKS; Honeywell C300"` (`--advisories off` for a machine without internet access). See [network/README.md](network/README.md).
 
-### 8. Analyst skills (where your AI assistant runs, optional)
+### 8. Rule factory exposure check (on the ticketing machine, optional)
+
+```bash
+scripts/install.sh rulefactory
+```
+
+Every 6 hours, raises a DFIR-IRIS alert for each remote-code-execution flaw that attackers are using now (CISA's Known Exploited Vulnerabilities list) and the vulnerability scanner finds on your hosts, saying whether detection rules are in place. It uses the forwarder's settings, and nothing about your hosts leaves your network. The drafting half runs on GitHub (`.github/workflows/rulefactory.yml`) from public information only and proposes new rules as pull requests. See [rulefactory/README.md](rulefactory/README.md).
+
+### 9. Analyst skills (where your AI assistant runs, optional)
 
 ```bash
 scripts/install.sh skills

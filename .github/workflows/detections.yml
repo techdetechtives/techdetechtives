@@ -1,0 +1,49 @@
+# TechDetechtives: test the detection rules and the rule factory.
+# Copyright (c) 2026 TechDetechtives. MIT licence (see LICENSE).
+#
+# Sigma rules are evaluated against sample events, YARA rules are compiled and
+# run on sample files, and the web and CVE Suricata rules are replayed through
+# Suricata itself from recorded requests (platform/detections/cases/).
+
+name: Detection rules
+
+on:
+  push:
+    paths:
+      - "platform/detections/**"
+      - "platform/tests/**"
+      - "rulefactory/**"
+      - "scripts/verify.sh"
+      - ".github/workflows/detections.yml"
+  pull_request:
+    paths:
+      - "platform/detections/**"
+      - "platform/tests/**"
+      - "rulefactory/**"
+      - "scripts/verify.sh"
+      - ".github/workflows/detections.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TD_SURICATA_IMAGE: jasonish/suricata:7.0.11
+
+jobs:
+  rules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tools (yara, PyYAML, Suricata image)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq yara
+          python3 -m pip install --quiet PyYAML==6.0.2
+          docker pull -q "$TD_SURICATA_IMAGE"
+      - name: Rule tests (Sigma, YARA, Suricata replay)
+        run: python3 -m unittest discover -s platform/tests -v
+      - name: Rule factory tests
+        run: python3 -m unittest discover -s rulefactory/tests -v
+      - name: Repository checks
+        run: scripts/verify.sh repo

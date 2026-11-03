@@ -1,0 +1,41 @@
+# TechDetechtives rule factory: exposure check, on the ticketing machine.
+# Copyright (c) 2026 TechDetechtives. MIT licence (see LICENSE).
+#
+# Every 6 hours: which remote-code-execution CVEs that attackers are using now
+# (CISA KEV) does the vulnerability scanner find on your hosts? Each one found
+# becomes a DFIR-IRIS alert naming the hosts and the detection rules in place.
+# Uses the forwarder's settings (read-only platform key, DFIR-IRIS key).
+#
+# Start with:  scripts/install.sh rulefactory
+
+name: techdetechtives-rulefactory
+
+services:
+  td-rulefactory:
+    build:
+      context: ..
+      dockerfile: rulefactory/Dockerfile
+    image: techdetechtives/rulefactory:0.1.0
+    container_name: td-rulefactory
+    env_file:
+      - ../config/techdetechtives.env
+    # Host networking, as for the forwarder: DFIR-IRIS on this host, the
+    # platform on the internal network.
+    network_mode: host
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: [/tmp]
+    volumes:
+      - td-rulefactory-state:/state
+      - ../analytics/certs:/certs:ro
+      - ../ticketing/certs:/iris-certs:ro
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-file: "5"
+        max-size: "5m"
+
+volumes:
+  td-rulefactory-state:

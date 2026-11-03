@@ -1,5 +1,6 @@
 # Used by the images whose build context is the repository root (the
-# vulnerability connector, the honeypot shipper and the network inventory).
+# vulnerability connector, the honeypot shipper, the network inventory and the
+# rule factory's exposure check).
 # Nothing but their source files is sent to Docker, so secrets, certificates
 # and fetched upstream code never enter the build. A file an image copies must
 # be listed here; scripts/verify.sh repo checks that.
@@ -10,4 +11,14 @@
 !honeypot/shipper/td_honeypot.py
 !network/app/td_net
 !network/app/td_net/*.py
+!rulefactory
+!rulefactory/*.py
+!rulefactory/products.yml
+!platform/detections
+!platform/detections/sigma
+!platform/detections/sigma/*.yml
+!platform/detections/suricata
+!platform/detections/suricata/*.rules
+!platform/detections/yara
+!platform/detections/yara/*.yar
 **/__pycache__

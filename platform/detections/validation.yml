@@ -407,6 +407,44 @@ checks:
           Tries to connect to this same machine and fails; nothing leaves it. The
           command line has the form a reverse shell uses.
 
+  - rule: sigma/techdetechtives_web_server_spawns_shell_linux.yml
+    title: TechDetechtives - Web Server or PHP Starts a Shell on Linux
+    technique: T1505.003
+    platform: linux
+    needs: process start events with parent process and command line from the Linux web server (Elastic Defend or auditd)
+    tests:
+      - kind: manual
+        name: A PHP page runs the id command through system()
+        plain: 'On a lab web server with PHP: echo "<?php system(''id''); ?>" | sudo tee /var/www/html/td-test.php; curl -s http://localhost/td-test.php; sudo rm /var/www/html/td-test.php'
+        expect: alert
+        confirmed: "no"
+        note: >
+          PHP (php-fpm, or Apache with mod_php) starts sh to run id, which is
+          exactly what a web shell does. The page prints the web server's
+          user id and is removed straight after. Use a lab server only.
+      - kind: manual
+        name: Apache piping its access log through rotatelogs
+        plain: 'CustomLog "|/usr/bin/rotatelogs /var/log/apache2/access.%Y%m%d 86400" combined'
+        expect: none
+        confirmed: "no"
+        note: Apache starts sh to run rotatelogs; the rule leaves that out.
+
+  - rule: sigma/techdetechtives_web_server_spawns_shell_windows.yml
+    title: TechDetechtives - Web Server or PHP Starts a Shell on Windows
+    technique: T1505.003
+    platform: windows
+    needs: process start events with parent process from the Windows web server (Elastic Defend or Sysmon)
+    tests:
+      - kind: manual
+        name: A PHP page on IIS or Apache runs whoami
+        plain: 'Put <?php echo shell_exec("whoami"); ?> in td-test.php in the lab site''s web root, open http://localhost/td-test.php, then delete the file'
+        expect: alert
+        confirmed: "no"
+        note: >
+          php-cgi.exe (IIS FastCGI) or httpd.exe starts cmd.exe to run whoami.
+          Under IIS without PHP, an ASPX page calling Process.Start("cmd.exe",
+          "/c whoami") gives the same alert from w3wp.exe.
+
   - rule: sigma/techdetechtives_ot_bacnet_device_disabled_or_restarted.yml
     title: TechDetechtives - BACnet Device Told to Restart or Stop Communicating
     technique: T0816
@@ -567,6 +605,32 @@ network_checks:
     note: >
       Must be plain http (not https) from a host inside the monitored network
       to an outside address, or the sensor cannot read the request.
+
+# Web attack rules (platform/detections/suricata/techdetechtives-web.rules).
+# Each one is also replayed through Suricata from recorded requests by
+# platform/tests/test_suricata_engine.py (cases in platform/detections/cases/).
+# Run these live only against a lab web server whose traffic the sensor sees.
+web_network_checks:
+  - rule: suricata/techdetechtives-web.rules
+    sid: [1900401, 1900404]
+    plain: 'curl -s -X POST --data "<?php echo 1; ?>" "http://<lab web server>/index.php?%ADd+allow_url_include%3d1+%ADd+auto_prepend_file%3dphp://input"'
+    expect: alert
+    confirmed: "no"
+    note: >
+      The CVE-2024-4577 request shape. A patched or non-Windows PHP ignores it,
+      so it is safe against any lab server; the sensor alerts on the request.
+  - rule: suricata/techdetechtives-web.rules
+    sid: [1900402]
+    plain: 'curl -s "http://<lab web server>/index.php?-d+allow_url_include%3don+-d+auto_prepend_file%3dphp://input"'
+    expect: alert
+    confirmed: "no"
+    note: The older PHP-CGI option injection (CVE-2012-1823) request shape.
+  - rule: suricata/techdetechtives-web.rules
+    sid: [1900403]
+    plain: 'curl -s "http://<lab web server>/test.php?cmd=whoami"'
+    expect: alert
+    confirmed: "no"
+    note: The page does not need to exist; the request is what the sensor reads.
 
 # OT network rules (platform/detections/suricata/techdetechtives-ot.rules).
 # Run these only against simulators or test controllers in a lab whose

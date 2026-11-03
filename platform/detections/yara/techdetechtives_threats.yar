@@ -168,3 +168,23 @@ rule TechDetechtives_Program_Exports_ReflectiveLoader
     condition:
         uint16(0) == 0x5A4D and filesize < 10MB and any of them
 }
+
+rule TechDetechtives_PHP_Reverse_Shell
+{
+    meta:
+        description = "PHP script that connects out to an address and hands it a shell (PHP reverse shell, often dropped through a PHP code execution flaw)"
+        author = "TechDetechtives"
+        date = "2026-11-03"
+        severity = "high"
+        reference = "https://attack.mitre.org/techniques/T1059/004/"
+    strings:
+        $php = "<?php" ascii nocase
+        $sock1 = /fsockopen\s*\(/ ascii nocase
+        $sock2 = /socket_connect\s*\(/ ascii nocase
+        $sock3 = /stream_socket_client\s*\(/ ascii nocase
+        $shell1 = /(proc_open|popen|exec|shell_exec|system|passthru)\s*\(\s*["'](\/bin\/(ba|z|da)?sh|cmd(\.exe)?)\b/ ascii nocase
+        $shell2 = /["']\/bin\/(ba|z|da)?sh\s+-i/ ascii nocase
+        $shell3 = /<&\s*3\s*>&\s*3\s*2>&\s*3/ ascii
+    condition:
+        filesize < 1MB and $php and any of ($sock*) and any of ($shell*)
+}

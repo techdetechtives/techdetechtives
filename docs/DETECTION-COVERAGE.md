@@ -22,13 +22,15 @@ Logs from endpoints (Elastic Agent) are checked by Sigma rules. All alerts land 
 
 | Set | Engine | Rules | Looks for |
 | --- | --- | --- | --- |
-| Endpoint threats | Sigma | 16 | Credential theft (LSASS dump, registry hives, Active Directory database), destroying backups, clearing logs, switching off Defender, Office starting a script, signed-binary abuse (mshta, regsvr32, certutil), suspicious scheduled tasks and services, WMI execution, encoded PowerShell, Linux reverse shells and piped downloads |
+| Endpoint threats | Sigma | 18 | Web servers and PHP starting a shell (web shells, PHP code execution such as CVE-2024-4577), credential theft (LSASS dump, registry hives, Active Directory database), destroying backups, clearing logs, switching off Defender, Office starting a script, signed-binary abuse (mshta, regsvr32, certutil), suspicious scheduled tasks and services, WMI execution, encoded PowerShell, Linux reverse shells and piped downloads |
 | OT, decoded protocols | Sigma | 3 | BACnet devices restarted or silenced, BACnet objects and files changed, Siemens S7 programs downloaded or uploaded |
 | Layer 2 | Sigma, on notices from a Zeek script | 5 | ARP poisoning, an address taken over by another network card, unasked ARP answers, MAC flooding, software-set card addresses, ARP sweeps |
 | OT, network | Suricata | 40 | Modbus, DNP3, EtherNet/IP-CIP, Siemens S7 and IEC 104 operations that stop, restart or reprogram a device; Honeywell Experion controller engineering ports; industrial protocols crossing the edge of the monitored network |
 | Floods | Suricata | 17 | ICMP, TCP SYN and UDP floods from one address or at one host, oversized pings, reflection and amplification, connection floods at controller ports, fragment floods, IPv6 router advertisement floods |
+| Web attacks | Suricata | 4 | PHP-CGI argument and option injection (CVE-2024-4577, CVE-2012-1823 family), web shell commands in request parameters, PHP code that runs commands sent in a request body |
 | General network | Suricata | 2 | Dynamic DNS lookups, PowerShell fetching over plain HTTP |
-| Files | YARA | 12 | Mimikatz, PowerShell download cradles and encoded launchers, AMSI bypass scripts, web shells, malicious shortcuts, script droppers, reflective loaders; TRITON framework files, SCADA attack modules, scripts that stop or reprogram a controller |
+| Exploited CVEs | Suricata, Sigma, YARA | As drafted | Rules the rule factory drafts for newly exploited remote-code-execution flaws, after an analyst approves them (see [rulefactory/README.md](../rulefactory/README.md)) |
+| Files | YARA | 13 | PHP reverse shells, Mimikatz, PowerShell download cradles and encoded launchers, AMSI bypass scripts, web shells, malicious shortcuts, script droppers, reflective loaders; TRITON framework files, SCADA attack modules, scripts that stop or reprogram a controller |
 
 The files are in `platform/detections/`. Every Sigma rule is paired with a test in `validation.yml` ([DETECTION-VALIDATION.md](DETECTION-VALIDATION.md)).
 

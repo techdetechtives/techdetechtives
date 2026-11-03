@@ -1,0 +1,76 @@
+# TechDetechtives rule factory: from newly exploited vulnerabilities to rules.
+# Copyright (c) 2026 TechDetechtives. MIT licence (see LICENSE).
+#
+# Every 6 hours: remote-code-execution CVEs that CISA adds to its Known
+# Exploited Vulnerabilities list are looked up in public rule sets, rules are
+# drafted where none exist, tested (Sigma logic, YARA samples, Suricata replay
+# of the exploit request) and proposed as a pull request for an analyst to
+# approve. Uses public information only; nothing from your network is here.
+# Your own exposure is checked on your network: scripts/install.sh rulefactory.
+#
+# Needs: Settings > Actions > General > "Allow GitHub Actions to create and
+# approve pull requests". Pull requests opened by this workflow do not start
+# other workflows, so this one runs the tests itself and puts the results in
+# the pull request.
+
+name: Rule factory
+
+on:
+  schedule:
+    - cron: "41 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      cve:
+        description: "One CVE to build now (empty: check CISA KEV for new ones)"
+        default: ""
+      days:
+        description: "How far back in KEV to look"
+        default: "14"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: rulefactory
+  cancel-in-progress: false
+
+env:
+  TD_SURICATA_IMAGE: jasonish/suricata:7.0.11
+  TD_RF_CACHE: ${{ github.workspace }}/../rulefactory-cache
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tools (yara, PyYAML, Suricata image)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq yara
+          python3 -m pip install --quiet PyYAML==6.0.2
+          docker pull -q "$TD_SURICATA_IMAGE"
+      - name: Download cache (rule sets and exploit templates)
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.TD_RF_CACHE }}
+          key: rulefactory-${{ github.run_id }}
+          restore-keys: rulefactory-
+      - name: Git identity for the rule branches
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CVE: ${{ github.event.inputs.cve }}
+          DAYS: ${{ github.event.inputs.days || '14' }}
+        run: |
+          if [ -n "$CVE" ]; then
+            python3 -m rulefactory build "$CVE" --publish
+          else
+            python3 -m rulefactory watch --days "$DAYS" --publish
+          fi

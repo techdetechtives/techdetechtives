@@ -77,7 +77,10 @@ if yaml:
     try:
         pairing = yaml.safe_load((root / "platform/detections/validation.yml").read_text())
         paired = {}
-        for check in pairing["checks"]:
+        # Rules drafted by the rule factory carry their pairing in their case file.
+        from_cases = [entry for case_file in sorted((root / "platform/detections/cases").glob("*.json"))
+                      for entry in __import__("json").loads(case_file.read_text()).get("validation", [])]
+        for check in pairing["checks"] + from_cases:
             paired[check["rule"]] = check
             rule_path = root / "platform/detections" / check["rule"]
             if not rule_path.is_file():
@@ -166,6 +169,11 @@ PY
       pass "wait for Greenbone's data containers"
     else
       fail "wait for Greenbone's data containers (run: vulnerability/tests/test_gb_wait.sh)"
+    fi
+    if python3 -m unittest discover -s "$ROOT/rulefactory/tests" >/dev/null 2>&1; then
+      pass "rule factory tests"
+    else
+      fail "rule factory tests (run: python3 -m unittest discover -s rulefactory/tests -v)"
     fi
     if python3 -m unittest discover -s "$ROOT/ticketing/tests" >/dev/null 2>&1; then
       pass "forwarder tests"

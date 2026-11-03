@@ -37,6 +37,12 @@
 #        Take everything seen so far as normal (the new baseline).
 #   scripts/install.sh network-down
 #        Stop the network inventory (what it learned is kept).
+#   scripts/install.sh rulefactory
+#        Run on the ticketing machine. Every 6 hours, raises a DFIR-IRIS alert for
+#        each remote-code-execution CVE that attackers are using now (CISA KEV)
+#        and the vulnerability scanner finds on your hosts. See rulefactory/README.md.
+#   scripts/install.sh rulefactory-down
+#        Stop that check.
 #   scripts/install.sh skills [--target DIR] [--only-techdetechtives]
 #        Run where your AI assistant runs. Installs the analyst skills
 #        (see skills/README.md).
@@ -334,6 +340,26 @@ cmd_network_down() {
   net_compose down
 }
 
+rf_compose() { docker compose -f "$ROOT/rulefactory/docker-compose.yml" "$@"; }
+
+cmd_rulefactory() {
+  not_on_platform rulefactory "the ticketing machine"
+  require_docker
+  [[ -f "$ENV_FILE" ]] || die "$ENV_FILE not found. Install ticketing first (scripts/install.sh ticketing)."
+  local name
+  for name in TD_ES_HOST TD_ES_API_KEY TD_IRIS_URL TD_IRIS_API_KEY; do
+    [[ -n "$(env_value "$name")" ]] || die "$name is empty in $ENV_FILE. The exposure check uses the forwarder's settings: set up ticketing first."
+  done
+  log "building and starting the rule factory's exposure check"
+  rf_compose up -d --build
+  log "it checks every 6 hours; follow it with: docker logs -f td-rulefactory"
+}
+
+cmd_rulefactory_down() {
+  require_docker
+  rf_compose down
+}
+
 cmd_vulnerability_down() {
   require_docker
   [[ -f "$ENV_FILE" ]] && vuln_compose down
@@ -355,6 +381,8 @@ case "${1:-}" in
   honeypot-down)  cmd_honeypot_down ;;
   network)        shift; cmd_network "$@" ;;
   network-down)   cmd_network_down ;;
+  rulefactory)    cmd_rulefactory ;;
+  rulefactory-down) cmd_rulefactory_down ;;
   skills)         shift; exec "$ROOT/skills/install-skills.sh" "$@" ;;
   -h|--help)      usage ;;
   *)              usage >&2; exit 2 ;;

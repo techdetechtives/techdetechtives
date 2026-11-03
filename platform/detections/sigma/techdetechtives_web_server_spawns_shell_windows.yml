@@ -1,0 +1,60 @@
+title: TechDetechtives - Web Server or PHP Starts a Shell on Windows
+id: e8ca6c27-6b5b-4d6b-9be8-166fa8910c84
+status: experimental
+description: >
+  Detects IIS, Apache, nginx, Tomcat or PHP starting a command shell,
+  PowerShell, a script host or a reconnaissance and download tool. This is how
+  a web shell runs its commands, and how remote code execution in a web
+  application becomes a foothold, including the PHP-CGI argument injection
+  CVE-2024-4577 that runs commands through php-cgi.exe.
+references:
+  - https://attack.mitre.org/techniques/T1505/003/
+  - https://nvd.nist.gov/vuln/detail/CVE-2024-4577
+author: TechDetechtives
+date: 2026-11-03
+tags:
+  - attack.persistence
+  - attack.t1505.003
+  - attack.initial_access
+  - attack.t1190
+  - attack.execution
+  - attack.t1059.001
+  - attack.t1059.003
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_parent:
+    ParentImage|endswith:
+      - '\w3wp.exe'
+      - '\httpd.exe'
+      - '\nginx.exe'
+      - '\php-cgi.exe'
+      - '\php.exe'
+      - '\php-win.exe'
+      - '\tomcat.exe'
+      - '\tomcat8.exe'
+      - '\tomcat9.exe'
+      - '\tomcat10.exe'
+  selection_child:
+    Image|endswith:
+      - '\cmd.exe'
+      - '\powershell.exe'
+      - '\pwsh.exe'
+      - '\wscript.exe'
+      - '\cscript.exe'
+      - '\mshta.exe'
+      - '\rundll32.exe'
+      - '\regsvr32.exe'
+      - '\certutil.exe'
+      - '\bitsadmin.exe'
+      - '\whoami.exe'
+      - '\net.exe'
+      - '\net1.exe'
+      - '\systeminfo.exe'
+      - '\nltest.exe'
+  condition: selection_parent and selection_child
+falsepositives:
+  - Web applications that run batch or PowerShell scripts on purpose (some management consoles do); add their exact command lines as filters
+  - PHP command-line scripts run by administrators (php.exe) that call cmd.exe
+level: high

@@ -1,0 +1,53 @@
+{
+  "about": "Requests the web rules (suricata/techdetechtives-web.rules) must alert on, and look-alikes they must not. Played through Suricata itself by platform/tests/test_suricata_engine.py.",
+  "covers": [1900401, 1900402, 1900403, 1900404],
+  "suricata": [
+    {
+      "name": "CVE-2024-4577 exploit: soft hyphens turn on remote include and run the request body",
+      "request": {"method": "POST", "uri": "/php-cgi/php-cgi.exe?%ADd+allow_url_include%3d1+%ADd+auto_prepend_file%3dphp://input",
+                  "headers": {"Content-Type": "application/x-www-form-urlencoded"}, "body": "<?php system('whoami'); ?>"},
+      "alerts": [1900401, 1900404]
+    },
+    {
+      "name": "CVE-2024-4577 exploit against index.php, lower-case encoding",
+      "request": {"method": "POST", "uri": "/index.php?%add+allow_url_include%3d1+%add+auto_prepend_file%3dphp%3a//input", "body": "<?php echo 1; ?>"},
+      "alerts": [1900401]
+    },
+    {
+      "name": "Older PHP-CGI option injection with a plain dash (CVE-2012-1823)",
+      "request": {"method": "POST", "uri": "/index.php?-d+allow_url_include%3don+-d+auto_prepend_file%3dphp://input", "body": "<?php passthru('id'); ?>"},
+      "alerts": [1900402, 1900404]
+    },
+    {
+      "name": "Web shell command in a GET parameter",
+      "request": {"method": "GET", "uri": "/uploads/img.php?cmd=whoami"},
+      "alerts": [1900403]
+    },
+    {
+      "name": "Web shell command with encoded spaces",
+      "request": {"method": "GET", "uri": "/shell.php?c=cat%20/etc/passwd"},
+      "alerts": [1900403]
+    },
+    {
+      "name": "Look-alike: a soft hyphen in an ordinary search",
+      "request": {"method": "GET", "uri": "/search.php?q=co%ADoperation&page=2"},
+      "alerts": []
+    },
+    {
+      "name": "Look-alike: a parameter called cmd with an ordinary value",
+      "request": {"method": "GET", "uri": "/admin.php?cmd=save&id=7"},
+      "alerts": []
+    },
+    {
+      "name": "Look-alike: a page about PHP that mentions system() in a form post",
+      "request": {"method": "POST", "uri": "/forum/post.php", "headers": {"Content-Type": "application/x-www-form-urlencoded"},
+                  "body": "title=help&text=How+do+I+call+system()+safely+in+PHP%3F"},
+      "alerts": []
+    },
+    {
+      "name": "Look-alike: PHP code uploaded without command functions",
+      "request": {"method": "POST", "uri": "/wp-admin/theme-editor.php", "body": "<?php get_header(); echo esc_html( get_the_title() ); ?>"},
+      "alerts": []
+    }
+  ]
+}

