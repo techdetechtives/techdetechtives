@@ -4,7 +4,7 @@
 
 Every request in platform/detections/cases/*.json ("suricata" lists) is written
 into a packet capture (pcap.py) and replayed through Suricata with all of the
-TechDetechtives rules loaded. Each request must raise exactly the rules it
+TechDetechtives rules loaded, so every rule must also load without an error. Each request must raise exactly the rules it
 lists, and none of the other rules its case file covers ("covers": the SIDs
 that file is the test for).
 
@@ -32,6 +32,10 @@ REQUESTS = [(case, set(data.get("covers", []))) for data in CASES for case in da
 # rules and every file the rule factory writes.
 COVERED_FILES = ["techdetechtives-web.rules"] + sorted(p.name for p in (DETECTIONS / "suricata").glob("techdetechtives-cve-*.rules"))
 IMAGE = os.environ.get("TD_SURICATA_IMAGE", "").strip()
+# Security Onion switches on the industrial protocol decoders that stock
+# Suricata leaves off (salt/suricata/defaults.yaml); the OT rules need them.
+PLATFORM_SETTINGS = [option for name in ("modbus", "dnp3", "enip")
+                     for option in ("--set", f"app-layer.protocols.{name}.enabled=yes")]
 
 
 def _sids(path: Path) -> set[int]:
@@ -58,7 +62,7 @@ def run_suricata(folder: Path) -> list[dict]:
     out.mkdir()
     os.chmod(folder, 0o777)
     os.chmod(out, 0o777)
-    args = ["-r", "traffic.pcap", "-S", "all.rules", "-k", "none", "-l", "out", "--runmode", "single"]
+    args = ["-r", "traffic.pcap", "-S", "all.rules", "-k", "none", "-l", "out", "--runmode", "single", *PLATFORM_SETTINGS]
     if _engine() == "local":
         command = ["suricata", *args]
         cwd = folder
